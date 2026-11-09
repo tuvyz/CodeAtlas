@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Схема кода</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #121418; --panel: #1a1d22; --line: #2c3038; --text: #e6e7ea; --muted: #a3a8b3;
+  --fn: #2a2440; --fnBorder: #7c6bc4; --call: #8a8f9c; --read: #6aa9e9; --write: #f0a050;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 14px; }
+.mono { font-family: 'JetBrains Mono', monospace; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--line); }
+header .title { font-size: 16px; font-weight: 700; }
+header .repo { font-size: 13px; color: var(--muted); }
+.search { display: flex; align-items: center; gap: 8px; flex: 1 1 260px; min-width: 0; }
+.search input { flex: 1 1 auto; min-width: 0; height: 40px; padding: 0 12px; background: var(--bg); color: var(--text); border: 1px solid #353a44; border-radius: 8px; font: inherit; }
+label { font-size: 13px; color: var(--muted); }
+.check { display: flex; align-items: center; gap: 6px; color: var(--text); cursor: pointer; }
+select { height: 40px; padding: 0 10px; background: var(--bg); color: var(--text); border: 1px solid #353a44; border-radius: 8px; font: inherit; }
+.btn { min-height: 40px; padding: 0 16px; background: #23262d; color: var(--text); border: 1px solid #353a44; border-radius: 8px; font: inherit; cursor: pointer; }
+.btn.primary { background: #6d5bd0; color: #fff; border: 0; font-weight: 600; }
+.layout { display: flex; flex-wrap: wrap; align-items: stretch; }
+nav { flex: 1 1 220px; padding: 20px 12px; background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 2px; }
+.caption { padding: 0 8px 8px; font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.tree { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 8px; background: transparent; color: #d6d9df; border: 0; border-radius: 8px; font: inherit; text-align: left; cursor: pointer; }
+.tree.file { padding-left: 28px; font-size: 13px; color: #c4c8d0; }
+.tree.active { background: #262a33; color: #f1edff; font-weight: 600; }
+.dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+.legend { display: flex; flex-direction: column; gap: 10px; padding: 0 8px; font-size: 13px; color: #c4c8d0; }
+.legend div { display: flex; align-items: center; gap: 10px; }
+.sw { width: 34px; height: 20px; flex: 0 0 auto; }
+main { flex: 999 1 560px; min-width: 0; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.hint { font-size: 13px; color: var(--muted); }
+.board { overflow: auto; background: #15171b; border: 1px solid var(--line); border-radius: 12px; }
+.host { position: relative; width: 900px; height: 772px; }
+.cluster { position: absolute; border: 1px dashed rgba(167,139,250,0.35); background: rgba(167,139,250,0.05); border-radius: 12px; }
+.cluster span { position: absolute; left: 12px; top: 8px; font-size: 12px; color: #a9a2c8; }
+.datahead { position: absolute; left: 660px; top: 48px; font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+svg.edges { position: absolute; left: 0; top: 0; width: 900px; height: 772px; overflow: visible; pointer-events: none; }
+.edge { fill: none; stroke-width: 2; transition: opacity 0.15s; }
+.edge.call { stroke: var(--call); }
+.edge.read { stroke: var(--read); stroke-dasharray: 6 5; }
+.edge.write { stroke: var(--write); }
+.edge.dim, .badge.dim { opacity: 0.12; }
+.edge.hidden, .badge.hidden, .node.hidden { display: none; }
+.badge { position: absolute; width: 18px; height: 18px; border-radius: 50%; background: #3a3f4d; color: #eef0f4; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; transition: opacity 0.15s; }
+.node { position: absolute; width: 220px; height: 64px; padding: 8px 12px; display: flex; flex-direction: column; justify-content: center; gap: 2px; text-align: left; font: inherit; cursor: pointer; transition: opacity 0.15s, box-shadow 0.15s; }
+.node .name { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.node .desc { font-size: 12px; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.node.fn { background: var(--fn); border: 1px solid var(--fnBorder); border-radius: 10px; color: #ece9f7; }
+.node.fn .desc { color: #c9c2e6; }
+.node.new { border: 2px solid #4cc38a; }
+.node.changed { border: 2px solid #e5c14a; }
+.node.ghost { background: rgba(229,99,90,0.08); border: 2px dashed #e5635a; border-radius: 10px; color: #f4a6a0; }
+.node.ghost .name { text-decoration: line-through; }
+.node.comp, .node.evt { height: 52px; padding: 6px 24px; clip-path: polygon(14px 0, 100% 0, calc(100% - 14px) 100%, 0 100%); border: 0; }
+.node.comp { background: #1f4a5c; color: #e2f2f8; }
+.node.evt { background: #5a4520; color: #f7ecd8; }
+.node.dim { opacity: 0.3; }
+.node.selected { box-shadow: 0 0 0 4px rgba(167,139,250,0.45); }
+.node.comp.selected, .node.evt.selected { filter: brightness(1.35); box-shadow: none; }
+.tag { display: inline-block; margin-left: 6px; padding: 0 5px; border-radius: 4px; font-family: Inter, sans-serif; font-size: 10px; font-weight: 600; vertical-align: 1px; }
+.tag.new { background: #1f4d36; color: #8fe3b8; }
+.tag.changed { background: #4d3f12; color: #f3dc8a; }
+aside { flex: 1 1 300px; padding: 20px; background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column; gap: 16px; }
+.selname { font-family: 'JetBrains Mono', monospace; font-size: 16px; font-weight: 600; word-break: break-all; }
+.where { margin-top: 4px; font-size: 13px; color: var(--muted); }
+.comment { margin: 0; font-size: 14px; line-height: 21px; }
+.sig { padding: 10px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 18px; color: #c4c8d0; word-break: break-word; }
+.group { display: flex; flex-direction: column; gap: 8px; }
+.group .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { min-height: 32px; padding: 0 10px; border-radius: 6px; font-family: 'JetBrains Mono', monospace; font-size: 12px; cursor: pointer; background: #2a2440; color: #ece9f7; border: 1px solid #4e4380; }
+.chip.data { background: #183644; color: #e2f2f8; border-color: #2c5a6e; }
+.empty { font-size: 13px; color: #6f7480; }
+footer { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 14px 20px; background: var(--panel); border-top: 1px solid var(--line); }
+.iconbtn { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; background: #23262d; color: var(--text); border: 1px solid #353a44; border-radius: 8px; cursor: pointer; }
+.range { display: flex; align-items: center; gap: 10px; flex: 1 1 320px; min-width: 0; }
+.range input { flex: 1 1 auto; min-width: 0; accent-color: #a78bfa; }
+.pill { padding: 4px 8px; border-radius: 6px; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="title">Схема кода</div>
+  <div class="repo">VoxelGame · master</div>
+  <div class="search">
+    <label for="search">Найти</label>
+    <input id="search" type="text" placeholder="Функция, компонент, файл">
+  </div>
+  <span style="font-size: 13px; color: var(--muted)">Показывать:</span>
+  <label class="check"><input type="checkbox" id="showCalls" checked> вызовы</label>
+  <label class="check"><input type="checkbox" id="showData" checked> компоненты</label>
+  <div style="display: flex; align-items: center; gap: 8px">
+    <label for="depth">Глубина</label>
+    <select id="depth"><option>1</option><option selected>2</option><option>3</option><option>все</option></select>
+  </div>
+  <button class="btn" type="button">Пересканировать</button>
+</header>
+
+<div class="layout">
+
+<nav aria-label="Системы">
+  <div class="caption">Системы</div>
+  <button class="tree active" type="button"><span class="dot" style="background: #a78bfa"></span>Destroyer</button>
+  <button class="tree file" type="button">Destroyer.cpp</button>
+  <button class="tree file" type="button">DynamicDestroy.cpp</button>
+  <button class="tree file" type="button">WeaponDestroy.cpp</button>
+  <button class="tree file" type="button">DestroyerConnectivity.cpp</button>
+  <button class="tree file" type="button">Connectivity.cpp</button>
+  <button class="tree" type="button"><span class="dot" style="background: #4fb3a9"></span>Physics</button>
+  <button class="tree" type="button"><span class="dot" style="background: #e879a6"></span>VoxelOverlays</button>
+  <button class="tree" type="button"><span class="dot" style="background: #5b9bd5"></span>ChunksManager</button>
+  <button class="tree" type="button"><span class="dot" style="background: #e5a54a"></span>ActiveRagdoll</button>
+
+  <div class="caption" style="margin-top: 24px">Легенда</div>
+  <div class="legend">
+    <div><span class="sw" style="background: #2a2440; border: 1px solid #7c6bc4; border-radius: 5px"></span>Функция</div>
+    <div><span class="sw" style="background: #1f4a5c; clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%)"></span>Компонент</div>
+    <div><span class="sw" style="background: #5a4520; clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%)"></span>Событие</div>
+    <div><span class="sw" style="background: #3d4150; clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%)"></span>Структура</div>
+    <div><svg class="sw" viewBox="0 0 34 20" aria-hidden="true"><line x1="0" y1="10" x2="34" y2="10" stroke="#8a8f9c" stroke-width="2"></line></svg>Вызывает</div>
+    <div><span class="badge" style="position: static">1</span>Порядок вызова</div>
+    <div><svg class="sw" viewBox="0 0 34 20" aria-hidden="true"><line x1="0" y1="10" x2="34" y2="10" stroke="#6aa9e9" stroke-width="2" stroke-dasharray="5 4"></line></svg>Читает</div>
+    <div><svg class="sw" viewBox="0 0 34 20" aria-hidden="true"><line x1="0" y1="10" x2="34" y2="10" stroke="#f0a050" stroke-width="2"></line></svg>Пишет</div>
+    <div><span class="sw" style="border: 2px solid #4cc38a; border-radius: 5px"></span>Добавлено</div>
+    <div><span class="sw" style="border: 2px solid #e5c14a; border-radius: 5px"></span>Изменено</div>
+    <div><span class="sw" style="border: 2px dashed #e5635a; border-radius: 5px"></span>Удалено</div>
+  </div>
+</nav>
+
+<main>
+  <div class="crumbs">
+    <div style="font-size: 15px"><span style="color: var(--muted)">Система:</span> <b>Destroyer</b></div>
+    <div class="hint">Клик по блоку - подсветка его связей, повторный клик, пустое место или Esc - сброс</div>
+  </div>
+  <div class="board">
+    <div class="host" id="host">
+      <div class="cluster" style="left: 40px; top: 40px; width: 260px; height: 330px"><span>Destroyer.cpp</span></div>
+      <div class="cluster" style="left: 340px; top: 40px; width: 260px; height: 420px"><span>DynamicDestroy.cpp</span></div>
+      <div class="cluster" style="left: 40px; top: 500px; width: 260px; height: 130px"><span>DestroyerConnectivity.cpp</span></div>
+      <div class="cluster" style="left: 340px; top: 500px; width: 260px; height: 230px"><span>Connectivity.cpp</span></div>
+      <div class="datahead">Данные</div>
+
+      <svg class="edges" viewBox="0 0 900 772" aria-hidden="true">
+        <defs>
+          <marker id="headCall" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#8a8f9c"></path></marker>
+          <marker id="headRead" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#6aa9e9"></path></marker>
+          <marker id="headWrite" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#f0a050"></path></marker>
+        </defs>
+        <path class="edge call" data-a="update" data-b="processVoxelEvents" d="M170 144 L170 178" marker-end="url(#headCall)"></path>
+        <path class="edge call" data-a="update" data-b="physicsDestroy" d="M280 112 L358 112" marker-end="url(#headCall)"></path>
+        <path class="edge call" data-a="update" data-b="recalcPendingMass" d="M60 102 C 24 102 24 312 58 312" marker-end="url(#headCall)"></path>
+        <path class="edge call" data-a="update" data-b="updateConnectivityPipeline" d="M60 122 C 8 122 8 572 58 572" marker-end="url(#headCall)"></path>
+        <path class="edge call" data-a="physicsDestroy" data-b="voronoiDestroy" d="M470 144 L470 178" marker-end="url(#headCall)"></path>
+        <path class="edge call" data-a="updateConnectivityPipeline" data-b="separateBodyPieces" d="M280 552 C 320 552 320 412 358 412" marker-end="url(#headCall)"></path>
+        <path class="edge call" data-a="updateConnectivityPipeline" data-b="buildConnectivity" d="M280 578 C 318 578 318 572 358 572" marker-end="url(#headCall)"></path>
+        <path class="edge call" data-a="updateConnectivityPipeline" data-b="updateConnectivityCell" d="M280 594 C 318 594 318 672 358 672" marker-end="url(#headCall)"></path>
+        <path class="edge read" data-a="Contacts_Event" data-b="physicsDestroy" d="M668 112 C 630 112 620 102 582 102" marker-end="url(#headRead)"></path>
+        <path class="edge read" data-a="DestructibleTag" data-b="physicsDestroy" d="M668 192 C 620 192 620 124 582 124" marker-end="url(#headRead)"></path>
+        <path class="edge write" data-a="recalcPendingMass" data-b="MassProperties" d="M280 312 C 320 312 320 262 360 262 L 600 262 C 630 262 630 306 666 306" marker-end="url(#headWrite)"></path>
+        <path class="edge read" data-a="VoxelMesh_uEvent" data-b="updateConnectivityPipeline" d="M668 546 C 630 546 630 482 600 482 L 330 482 C 300 482 300 564 282 564" marker-end="url(#headRead)"></path>
+        <path class="edge write" data-a="updateConnectivityPipeline" data-b="VoxelConnectivity" d="M170 604 L170 752 L620 752 C 644 752 644 646 666 646" marker-end="url(#headWrite)"></path>
+      </svg>
+
+      <div class="badge" data-a="update" data-b="processVoxelEvents" style="left: 178px; top: 152px">1</div>
+      <div class="badge" data-a="update" data-b="physicsDestroy" style="left: 310px; top: 90px">2</div>
+      <div class="badge" data-a="update" data-b="recalcPendingMass" style="left: 22px; top: 230px">3</div>
+      <div class="badge" data-a="update" data-b="updateConnectivityPipeline" style="left: 2px; top: 340px">4</div>
+      <div class="badge" data-a="updateConnectivityPipeline" data-b="separateBodyPieces" style="left: 300px; top: 500px">1</div>
+      <div class="badge" data-a="updateConnectivityPipeline" data-b="buildConnectivity" style="left: 322px; top: 548px">2</div>
+      <div class="badge" data-a="updateConnectivityPipeline" data-b="updateConnectivityCell" style="left: 322px; top: 628px">3</div>
+
+      <button class="node fn" type="button" id="update" style="left: 60px; top: 80px"><span class="name">Destroyer::update</span><span class="desc">Шаг уничтожителя за кадр</span></button>
+      <button class="node fn" type="button" id="processVoxelEvents" style="left: 60px; top: 180px"><span class="name">processVoxelEvents</span><span class="desc">Гасит опоры костей по событиям</span></button>
+      <button class="node fn" type="button" id="recalcPendingMass" style="left: 60px; top: 280px"><span class="name">recalcPendingMass</span><span class="desc">Пересчёт массы тел пачками</span></button>
+      <button class="node fn new" type="button" id="physicsDestroy" style="left: 360px; top: 80px"><span class="name">physicsDestroy<span class="tag new">новое</span></span><span class="desc">Решает, что ломается от ударов</span></button>
+      <button class="node fn" type="button" id="voronoiDestroy" style="left: 360px; top: 180px"><span class="name">voronoiDestroy</span><span class="desc">Колет воксели по Вороному</span></button>
+      <button class="node ghost" type="button" id="spreadCracks" style="left: 360px; top: 280px"><span class="name">spreadCracks</span><span class="desc">Удалено в этом коммите</span></button>
+      <button class="node fn" type="button" id="separateBodyPieces" style="left: 360px; top: 380px"><span class="name">separateBodyPieces</span><span class="desc">Отделяет оторванные куски в тела</span></button>
+      <button class="node fn" type="button" id="updateConnectivityPipeline" style="left: 60px; top: 540px"><span class="name">updateConnectivityPipeline</span><span class="desc">Конвейер связности</span></button>
+      <button class="node fn" type="button" id="buildConnectivity" style="left: 360px; top: 540px"><span class="name">buildConnectivity</span><span class="desc">Строит связность меша с нуля</span></button>
+      <button class="node fn changed" type="button" id="updateConnectivityCell" style="left: 360px; top: 640px"><span class="name">updateConnectivityCell<span class="tag changed">изменено</span></span><span class="desc">Пересчёт одной ячейки</span></button>
+
+      <button class="node evt" type="button" id="Contacts_Event" style="left: 660px; top: 86px"><span class="name">Contacts_Event</span><span class="desc">событие</span></button>
+      <button class="node comp" type="button" id="DestructibleTag" style="left: 660px; top: 166px"><span class="name">DestructibleTag</span><span class="desc">компонент</span></button>
+      <button class="node comp" type="button" id="MassProperties" style="left: 660px; top: 280px"><span class="name">MassProperties</span><span class="desc">компонент</span></button>
+      <button class="node evt" type="button" id="VoxelMesh_uEvent" style="left: 660px; top: 520px"><span class="name">VoxelMesh_uEvent</span><span class="desc">событие</span></button>
+      <button class="node comp" type="button" id="VoxelConnectivity" style="left: 660px; top: 620px"><span class="name">VoxelConnectivity</span><span class="desc">компонент</span></button>
+    </div>
+  </div>
+</main>
+
+<aside aria-label="Подробности">
+  <div class="caption" style="padding: 0">Выбрано</div>
+  <div>
+    <div class="selname" id="selName"></div>
+    <div class="where" id="selWhere"></div>
+  </div>
+  <p class="comment" id="selComment"></p>
+  <div class="sig" id="selSig"></div>
+  <div id="selGroups" style="display: flex; flex-direction: column; gap: 16px"></div>
+  <div style="display: flex; flex-wrap: wrap; gap: 8px">
+    <button class="btn primary" type="button">Открыть в коде</button>
+    <button class="btn" type="button">История блока</button>
+  </div>
+</aside>
+
+</div>
+
+<footer>
+  <div class="caption" style="padding: 0">История</div>
+  <button class="iconbtn" type="button" aria-label="Предыдущий коммит"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3 L5 8 L10 13"></path></svg></button>
+  <div class="range">
+    <label for="commit">Коммит 41 из 48</label>
+    <input id="commit" type="range" min="1" max="48" value="41">
+  </div>
+  <button class="iconbtn" type="button" aria-label="Следующий коммит"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3 L11 8 L6 13"></path></svg></button>
+  <div style="font-size: 13px"><span class="mono" style="color: #b9a8ff">a3f9c12</span> <span style="color: var(--muted)">09.11.2026</span> Тела отрываются пачками</div>
+  <div style="display: flex; gap: 6px">
+    <span class="pill" style="background: #1f4d36; color: #8fe3b8">+1 новая</span>
+    <span class="pill" style="background: #4d3f12; color: #f3dc8a">1 изменена</span>
+    <span class="pill" style="background: #4d1f1c; color: #f4a6a0">1 удалена</span>
+  </div>
+  <div style="display: flex; align-items: center; gap: 8px">
+    <label for="compare">Сравнить с</label>
+    <select id="compare"><option selected>предыдущим</option><option>вчерашним</option><option>неделю назад</option></select>
+  </div>
+</footer>
+
+<script>
+var info = {
+  update: ['Destroyer.cpp : 40', 'Шаг уничтожителя за кадр: события вокселей, разрушение от ударов, масса, связность', 'void Destroyer::update(float deltaTime)'],
+  processVoxelEvents: ['Destroyer.cpp : 118', 'Гасит опоры костей по событиям вокселей и ставит тела на проверку', 'void Destroyer::processVoxelEvents()'],
+  recalcPendingMass: ['Destroyer.cpp : 260', 'Пересчитывает массу накопленных тел пачками в пуле, бюджет 1 мс', 'void Destroyer::recalcPendingMass(float budgetMs)'],
+  physicsDestroy: ['DynamicDestroy.cpp : 30', 'Каждая сущность с ударами решает, что в ней ломается, потом всё колется разом', 'void Destroyer::physicsDestroy()'],
+  voronoiDestroy: ['DynamicDestroy.cpp : 142', 'Колет воксели по Вороному: крупные кластеры в осколки, остальное удаляет', 'void Destroyer::voronoiDestroy(entt::entity entity, glm::vec3 point, float strength, float radius)'],
+  spreadCracks: ['DynamicDestroy.cpp (удалена)', 'Функция удалена в коммите a3f9c12', ''],
+  separateBodyPieces: ['DynamicDestroy.cpp : 310', 'Отделяет оторвавшиеся куски тела в новые тела', 'void Destroyer::separateBodyPieces(entt::entity body, FastVector<Piece>& pieces)'],
+  updateConnectivityPipeline: ['DestroyerConnectivity.cpp : 212', 'Конвейер связности: сбор тронутых листов, пересчёт ячеек пачками в пуле, проверка отрыва статики и тел', 'void Destroyer::updateConnectivityPipeline(float budgetMs)'],
+  buildConnectivity: ['Connectivity.cpp : 20', 'Строит ячейки связности меша с нуля', 'void buildConnectivity(VoxelMesh& mesh, VoxelConnectivity& connectivity)'],
+  updateConnectivityCell: ['Connectivity.cpp : 96', 'Пересчитывает группы, компоненты и порталы одной ячейки', 'void updateConnectivityCell(VoxelMesh& mesh, VoxelConnectivity::Cell& cell)'],
+  Contacts_Event: ['ECS/Components/PhysicsContacts.h : 18', 'Контакты сущности за кадр, кусок общей кучи контактов', 'struct Contacts_Event { ArrayPart<PhysicsContact> contacts; }'],
+  DestructibleTag: ['ECS/Components/Tags.h : 12', 'Сущность ломается физикой', 'struct DestructibleTag {}'],
+  MassProperties: ['ECS/Components/MassProperties.h : 8', 'Масса, центр масс и тензор инерции тела', 'struct MassProperties { ... }'],
+  VoxelMesh_uEvent: ['ECS/Components/VoxelMesh.h : 64', 'Меш изменился: заливка на GPU и сбор связности', 'struct VoxelMesh_uEvent {}'],
+  VoxelConnectivity: ['ECS/Components/VoxelConnectivity.h : 10', 'Ячейки, группы и порталы связности меша', 'struct VoxelConnectivity { FastVector<Cell> cells; }']
+};
+
+var nodes = Array.prototype.slice.call(document.querySelectorAll('.node'));
+var edges = Array.prototype.slice.call(document.querySelectorAll('.edge, .badge[data-a]'));
+var dataNodes = ['Contacts_Event', 'DestructibleTag', 'MassProperties', 'VoxelMesh_uEvent', 'VoxelConnectivity'];
+var selected = null;
+
+function chipRow(title, ids) {
+  var html = '<div class="group"><div class="where" style="margin: 0">' + title + '</div><div class="chips">';
+  if (ids.length === 0) html += '<span class="empty">нет</span>';
+  ids.forEach(function (id) {
+    var isData = dataNodes.indexOf(id) >= 0;
+    html += '<button type="button" class="chip' + (isData ? ' data' : '') + '" data-go="' + id + '">' + id + '</button>';
+  });
+  return html + '</div></div>';
+}
+
+function render() {
+  if (!selected) {
+    nodes.forEach(function (node) { node.classList.remove('selected', 'dim'); });
+    edges.forEach(function (edge) { edge.classList.remove('dim'); });
+    document.getElementById('selName').textContent = 'Ничего не выбрано';
+    document.getElementById('selWhere').textContent = 'Клик по блоку покажет его связи и описание';
+    document.getElementById('selComment').textContent = '';
+    document.getElementById('selSig').style.display = 'none';
+    document.getElementById('selGroups').innerHTML = '';
+    return;
+  }
+  var neighbors = {};
+  neighbors[selected] = true;
+  var calls = [], callers = [], reads = [], writes = [];
+  document.querySelectorAll('.edge').forEach(function (edge) {
+    var a = edge.dataset.a, b = edge.dataset.b;
+    if (a !== selected && b !== selected) return;
+    neighbors[a] = true; neighbors[b] = true;
+    var kind = edge.classList.contains('call') ? 'call' : edge.classList.contains('read') ? 'read' : 'write';
+    if (kind === 'call') (a === selected ? calls : callers).push(a === selected ? b : a);
+    if (kind === 'read') reads.push(a === selected ? b : a);
+    if (kind === 'write') writes.push(a === selected ? b : a);
+  });
+  nodes.forEach(function (node) {
+    node.classList.toggle('selected', node.id === selected);
+    node.classList.toggle('dim', !neighbors[node.id]);
+  });
+  edges.forEach(function (edge) {
+    edge.classList.toggle('dim', edge.dataset.a !== selected && edge.dataset.b !== selected);
+  });
+  var data = info[selected];
+  document.getElementById('selName').textContent = selected;
+  document.getElementById('selWhere').textContent = data[0];
+  document.getElementById('selComment').textContent = data[1];
+  var sig = document.getElementById('selSig');
+  sig.textContent = data[2];
+  sig.style.display = data[2] ? '' : 'none';
+  var isData = dataNodes.indexOf(selected) >= 0;
+  var groups = isData
+    ? chipRow('Читают', reads) + chipRow('Пишут', writes)
+    : chipRow('Вызывает', calls) + chipRow('Вызывают', callers) + chipRow('Читает', reads) + chipRow('Пишет', writes);
+  document.getElementById('selGroups').innerHTML = groups;
+  document.querySelectorAll('[data-go]').forEach(function (chip) {
+    chip.addEventListener('click', function () { selected = chip.dataset.go; render(); });
+  });
+}
+
+nodes.forEach(function (node) {
+  node.addEventListener('click', function (event) {
+    event.stopPropagation();
+    selected = selected === node.id ? null : node.id;
+    render();
+  });
+});
+document.getElementById('host').addEventListener('click', function () { selected = null; render(); });
+document.addEventListener('keydown', function (event) { if (event.key === 'Escape') { selected = null; render(); } });
+
+function applyFilters() {
+  var showCalls = document.getElementById('showCalls').checked;
+  var showData = document.getElementById('showData').checked;
+  document.querySelectorAll('.edge.call, .badge[data-a]').forEach(function (el) { el.classList.toggle('hidden', !showCalls); });
+  document.querySelectorAll('.edge.read, .edge.write').forEach(function (el) { el.classList.toggle('hidden', !showData); });
+  dataNodes.forEach(function (id) { document.getElementById(id).classList.toggle('hidden', !showData); });
+}
+document.getElementById('showCalls').addEventListener('change', applyFilters);
+document.getElementById('showData').addEventListener('change', applyFilters);
+
+render();
+</script>
+</body>
+</html>
