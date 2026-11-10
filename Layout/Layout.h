@@ -98,8 +98,9 @@ public:
     static double folderTitleSizeAt(int depth);
     // Размер имени папки глубины depth (последняя часть пути): ширина по знакам моноширинного шрифта, высота - с выносными элементами
     static glm::dvec2 folderTitleBox(const std::wstring &path, int depth);
-    // Область папки по местам её содержимого (рамки файлов, области подпапок): с отступом, имя - в левом верхнем углу без своей полосы,
-    // содержимое справа от имени - на той же высоте; где содержимое под именем, область выше - имя встаёт над ним. Не уже имени
+    // Полоса имени папки глубины depth: по высоте имени с небольшим запасом
+    static double folderHeaderHeight(int depth);
+    // Область папки по местам её содержимого (рамки файлов, области подпапок): с отступом и полосой имени сверху во всю ширину. Не уже имени
     static LayoutRect folderArea(const std::vector<LayoutRect> &children, const std::wstring &path, int depth);
 
 private:

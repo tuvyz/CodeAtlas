@@ -164,7 +164,7 @@ private:
     // Связь кривой от узла к узлу; badge - номер вызова у дальнего от выбранного конца (0 - без номера)
     void addEdge(int fromNode, int toNode, EdgeKind kind, bool isHighlighted, int badge, bool isBadgeAtTarget);
 
-    // Что под точкой холста: узел, пометка, полоса имени файла, имя папки (-1 - ничего)
+    // Что под точкой холста: узел, пометка, полоса имени файла, полоса имени папки (-1 - ничего)
     int hitNode(glm::dvec2 world) const;
     int hitNote(glm::dvec2 world) const;
     int hitFrameHeader(glm::dvec2 world) const;

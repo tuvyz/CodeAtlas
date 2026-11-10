@@ -261,15 +261,24 @@ void MapView::buildScene() {
     }
     bool isFading = selectedNode >= 0;
 
-    // Области папок: заливка цветом папки верхнего уровня, имя в левом верхнем углу. Имена папок и файлов - размером холста при любом
-    // масштабе: карта масштабируется целиком, как одна картинка
+    // Области папок: заливка цветом папки верхнего уровня, сверху полоса имени во всю ширину тоном темнее. Имена папок и файлов -
+    // размером холста при любом масштабе: карта масштабируется целиком, как одна картинка
     for (const FolderArea &area : folders) {
         glm::vec4 accent = folderAccent(area.colorIndex);
         glm::vec4 fill = glm::mix(paperColor, accent, 0.06f + 0.035f * (area.depth - 1));
         glm::vec4 border = glm::mix(paperColor, accent, 0.32f);
         areaLayer.shapes.push_back(boxShape(area.rect, ShapeKind::RoundBox, 16, fill, border, 1));
+
+        // Полоса имени: скруглённая сверху (нижние углы закрыты прямоугольником)
+        glm::vec4 headerFill = glm::mix(fill, accent, 0.16f);
+        double headerHeight = Layout::folderHeaderHeight(area.depth);
+        LayoutRect header{area.rect.position + glm::dvec2(1, 1), glm::dvec2(area.rect.size.x - 2, headerHeight - 1)};
+        areaLayer.shapes.push_back(boxShape(header, ShapeKind::RoundBox, 15, headerFill, glm::vec4(0), 0));
+        LayoutRect headerBottom{header.position + glm::dvec2(0, header.size.y * 0.5), glm::dvec2(header.size.x, header.size.y * 0.5)};
+        areaLayer.shapes.push_back(boxShape(headerBottom, ShapeKind::RoundBox, 0, headerFill, glm::vec4(0), 0));
+
         float titleSize = float(Layout::folderTitleSizeAt(area.depth));
-        glm::vec2 titlePosition = glm::vec2(area.rect.position) + glm::vec2(float(Layout::folderPadding), float(Layout::folderPadding) + titleSize * 0.5f);
+        glm::vec2 titlePosition = glm::vec2(area.rect.position) + glm::vec2(float(Layout::folderPadding), float(headerHeight) * 0.5f);
         font.addText(areaLayer, lastPathPart(area.path), titlePosition, titleSize, glm::mix(accent, glm::vec4(0, 0, 0, 1), 0.28f));
     }
 
@@ -770,7 +779,7 @@ MapView::NodeLinks MapView::linksOf(int nodeIndex) const {
 }
 
 
-// Что под точкой холста: узел, пометка, полоса имени файла, имя папки (-1 - ничего)
+// Что под точкой холста: узел, пометка, полоса имени файла, полоса имени папки (-1 - ничего)
 int MapView::hitNode(glm::dvec2 world) const {
     for (int nodeIndex = int(nodeRects.size()) - 1; nodeIndex >= 0; --nodeIndex) {
         if (nodeRects[nodeIndex].size.x > 0 && nodeRects[nodeIndex].contains(world))
@@ -800,8 +809,7 @@ int MapView::hitFrameHeader(glm::dvec2 world) const {
 int MapView::hitFolderHeader(glm::dvec2 world) const {
     int found = -1;
     for (int folderIndex = 0; folderIndex < int(folders.size()); ++folderIndex) {
-        glm::dvec2 titleBox = Layout::folderTitleBox(folders[folderIndex].path, folders[folderIndex].depth);
-        LayoutRect header{folders[folderIndex].rect.position, titleBox + glm::dvec2(2 * Layout::folderPadding, Layout::folderPadding * 1.5)};
+        LayoutRect header{folders[folderIndex].rect.position, glm::dvec2(folders[folderIndex].rect.size.x, Layout::folderHeaderHeight(folders[folderIndex].depth))};
         if (header.contains(world) && (found < 0 || folders[folderIndex].depth > folders[found].depth))
             found = folderIndex;
     }

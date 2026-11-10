@@ -138,24 +138,21 @@ glm::dvec2 Layout::folderTitleBox(const std::wstring &path, int depth) {
     return glm::dvec2(double(nameLength) * 0.6, 1.25) * folderTitleSizeAt(depth);
 }
 
-// Область папки по местам её содержимого (рамки файлов, области подпапок): с отступом, имя - в левом верхнем углу без своей полосы,
-// содержимое справа от имени - на той же высоте; где содержимое под именем, область выше - имя встаёт над ним. Не уже имени
+// Полоса имени папки глубины depth: по высоте имени с небольшим запасом
+double Layout::folderHeaderHeight(int depth) {
+    return folderTitleSizeAt(depth) * 1.25 + folderPadding * 0.5;
+}
+
+// Область папки по местам её содержимого (рамки файлов, области подпапок): с отступом и полосой имени сверху во всю ширину. Не уже имени
 LayoutRect Layout::folderArea(const std::vector<LayoutRect> &children, const std::wstring &path, int depth) {
     glm::dvec2 minimum(1e300), maximum(-1e300);
     for (const LayoutRect &child : children) {
         minimum = glm::min(minimum, child.position);
         maximum = glm::max(maximum, child.position + child.size);
     }
-    glm::dvec2 titleBox = folderTitleBox(path, depth);
     double left = minimum.x - folderPadding;
-    double top = minimum.y - folderPadding;
-    constexpr double tolerance = 1e-6;
-    double titleRight = left + folderPadding + titleBox.x + frameGap - tolerance;
-    for (const LayoutRect &child : children) {
-        if (child.position.x < titleRight)
-            top = std::min(top, child.position.y - frameGap - titleBox.y - folderPadding);
-    }
-    double right = std::max(maximum.x + folderPadding, left + titleBox.x + 2 * folderPadding);
+    double top = minimum.y - folderPadding - folderHeaderHeight(depth);
+    double right = std::max(maximum.x + folderPadding, left + folderTitleBox(path, depth).x + 2 * folderPadding);
     return LayoutRect{glm::dvec2(left, top), glm::dvec2(right - left, maximum.y + folderPadding - top)};
 }
 
@@ -274,19 +271,14 @@ glm::dvec2 Layout::packFiles(const Graph &graph, const std::map<std::wstring, st
         }
         double shelfWidth = std::max(widest, std::sqrt(area) * 1.5);
 
-        // Имя папки (рисуемой глубины) - первым в первой полке: содержимое встаёт справа от него и под ним
+        // У папки рисуемой глубины сверху полоса имени во всю ширину; область не уже имени
         double inset = isRoot ? 0 : folderPadding;
-        glm::dvec2 cursor(inset, inset);
-        double rowHeight = 0;
-        double contentWidth = 0;
         int projectDepth = baseDepth + folder.depth;
-        if (!isRoot && projectDepth <= maxFolderDepth) {
-            glm::dvec2 titleBox = folderTitleBox(folder.name, projectDepth);
-            shelfWidth = std::max(shelfWidth, titleBox.x);
-            cursor.x += titleBox.x + frameGap;
-            rowHeight = titleBox.y;
-            contentWidth = titleBox.x;
-        }
+        bool hasHeader = !isRoot && projectDepth <= maxFolderDepth;
+        double top = hasHeader ? folderHeaderHeight(projectDepth) : 0;
+        glm::dvec2 cursor(inset, top + inset);
+        double rowHeight = 0;
+        double contentWidth = hasHeader ? folderTitleBox(folder.name, projectDepth).x : 0;
         for (const Item &item : items) {
             if (cursor.x > inset && cursor.x - inset + item.size.x > shelfWidth) {
                 cursor.x = inset;
