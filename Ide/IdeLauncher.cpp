@@ -3,6 +3,8 @@
 #ifdef _WIN32
 #include <windows.h>
 #include <tlhelp32.h>
+#include <objbase.h>
+#include <oleauto.h>
 #endif
 
 
@@ -84,6 +86,149 @@ bool IdeLauncher::isProcessRunning(const std::wstring &executableName) {
         if (std::getline(comm, name) && lowercase(stringToWString(name)) == wanted)
             return true;
     }
+    return false;
+#endif
+}
+
+
+// Visual Studio (devenv.exe) в Program Files, самая новая; пусто - не найдена или не Windows
+std::filesystem::path IdeLauncher::findVisualStudio() {
+#ifdef _WIN32
+    // Microsoft Visual Studio/<версия>/<выпуск>/Common7/IDE/devenv.exe; версии - по имени папки (2019, 2022, 18 и т.п.), берётся последняя
+    std::error_code errorCode;
+    std::vector<std::filesystem::path> found;
+    for (const wchar_t *variable : {L"ProgramFiles", L"ProgramFiles(x86)"}) {
+        const wchar_t *programFiles = _wgetenv(variable);
+        if (programFiles == nullptr)
+            continue;
+        std::filesystem::path studioRoot = std::filesystem::path(programFiles) / "Microsoft Visual Studio";
+        for (const auto &version : std::filesystem::directory_iterator(studioRoot, errorCode)) {
+            for (const auto &edition : std::filesystem::directory_iterator(version.path(), errorCode)) {
+                std::filesystem::path devenv = edition.path() / "Common7" / "IDE" / "devenv.exe";
+                if (std::filesystem::is_regular_file(devenv, errorCode))
+                    found.push_back(devenv);
+            }
+        }
+    }
+    std::sort(found.begin(), found.end(), [](const std::filesystem::path &first, const std::filesystem::path &second) {
+        std::wstring firstVersion = first.parent_path().parent_path().parent_path().parent_path().filename().wstring();
+        std::wstring secondVersion = second.parent_path().parent_path().parent_path().parent_path().filename().wstring();
+        return firstVersion.size() != secondVersion.size() ? firstVersion.size() < secondVersion.size() : firstVersion < secondVersion;
+    });
+    return found.empty() ? std::filesystem::path() : found.back();
+#else
+    return std::filesystem::path();
+#endif
+}
+
+
+// Открыть файл на строке в запущенной Visual Studio, где открыт этот проект (решение в папке проекта или сама папка); false - нет такой
+bool IdeLauncher::openInRunningVisualStudio(const std::wstring &projectRoot, const std::wstring &file, int line) {
+#ifdef _WIN32
+    // Свойство или метод объекта автоматизации по имени; аргументы - по порядку (IDispatch ждёт их в обратном)
+    auto invoke = [](IDispatch *object, const wchar_t *name, WORD flags, std::vector<VARIANT> arguments, VARIANT &result) {
+        VariantInit(&result);
+        if (object == nullptr)
+            return false;
+        DISPID dispatchId = 0;
+        LPOLESTR names[] = {const_cast<LPOLESTR>(name)};
+        if (FAILED(object->GetIDsOfNames(IID_NULL, names, 1, LOCALE_USER_DEFAULT, &dispatchId)))
+            return false;
+        std::reverse(arguments.begin(), arguments.end());
+        DISPPARAMS parameters = {arguments.data(), nullptr, UINT(arguments.size()), 0};
+        return SUCCEEDED(object->Invoke(dispatchId, IID_NULL, LOCALE_USER_DEFAULT, flags, &parameters, &result, nullptr, nullptr));
+    };
+    auto property = [&](IDispatch *object, const wchar_t *name) {
+        VARIANT result;
+        invoke(object, name, DISPATCH_PROPERTYGET, {}, result);
+        return result;
+    };
+    auto normalized = [](std::wstring path) {
+        for (wchar_t &character : path)
+            character = character == L'\\' ? L'/' : wchar_t(std::towlower(character));
+        while (!path.empty() && path.back() == L'/')
+            path.pop_back();
+        return path;
+    };
+    std::wstring root = normalized(projectRoot);
+    std::wstring rootName = std::filesystem::path(projectRoot).filename().wstring();
+
+    // Объекты DTE запущенных Visual Studio - в таблице запущенных объектов COM («!VisualStudio.DTE.<версия>:<процесс>»)
+    IRunningObjectTable *table = nullptr;
+    IEnumMoniker *monikers = nullptr;
+    IBindCtx *bindContext = nullptr;
+    if (FAILED(GetRunningObjectTable(0, &table)) || FAILED(table->EnumRunning(&monikers)) || FAILED(CreateBindCtx(0, &bindContext))) {
+        if (monikers != nullptr)
+            monikers->Release();
+        if (table != nullptr)
+            table->Release();
+        return false;
+    }
+    bool isOpened = false;
+    IMoniker *moniker = nullptr;
+    while (!isOpened && monikers->Next(1, &moniker, nullptr) == S_OK) {
+        LPOLESTR displayName = nullptr;
+        bool isStudio = SUCCEEDED(moniker->GetDisplayName(bindContext, nullptr, &displayName)) && displayName != nullptr &&
+                        std::wstring(displayName).rfind(L"!VisualStudio.DTE.", 0) == 0;
+        if (displayName != nullptr)
+            CoTaskMemFree(displayName);
+        IUnknown *unknown = nullptr;
+        IDispatch *studio = nullptr;
+        if (isStudio && SUCCEEDED(table->GetObject(moniker, &unknown)) && SUCCEEDED(unknown->QueryInterface(IID_IDispatch, reinterpret_cast<void**>(&studio)))) {
+            // Этот проект: решение в папке проекта (Solution.FullName) или открытая папка проекта (её имя в заголовке окна)
+            VARIANT solution = property(studio, L"Solution");
+            VARIANT solutionName = property(solution.vt == VT_DISPATCH ? solution.pdispVal : nullptr, L"FullName");
+            VARIANT mainWindow = property(studio, L"MainWindow");
+            VARIANT caption = property(mainWindow.vt == VT_DISPATCH ? mainWindow.pdispVal : nullptr, L"Caption");
+            std::wstring solutionPath = solutionName.vt == VT_BSTR && solutionName.bstrVal != nullptr ? normalized(solutionName.bstrVal) : std::wstring();
+            std::wstring captionText = caption.vt == VT_BSTR && caption.bstrVal != nullptr ? caption.bstrVal : std::wstring();
+            bool isThisProject = (!solutionPath.empty() && solutionPath.rfind(root, 0) == 0) || captionText.rfind(rootName + L" ", 0) == 0;
+            if (isThisProject) {
+                // ItemOperations.OpenFile(путь), ActiveDocument.Selection.GotoLine(строка), окно - вперёд
+                VARIANT itemOperations = property(studio, L"ItemOperations");
+                VARIANT pathArgument;
+                VariantInit(&pathArgument);
+                pathArgument.vt = VT_BSTR;
+                pathArgument.bstrVal = SysAllocString(file.c_str());
+                VARIANT openResult;
+                isOpened = invoke(itemOperations.vt == VT_DISPATCH ? itemOperations.pdispVal : nullptr, L"OpenFile", DISPATCH_METHOD, {pathArgument},
+                                  openResult);
+                VariantClear(&openResult);
+                VariantClear(&pathArgument);
+                VariantClear(&itemOperations);
+                if (isOpened) {
+                    VARIANT document = property(studio, L"ActiveDocument");
+                    VARIANT selection = property(document.vt == VT_DISPATCH ? document.pdispVal : nullptr, L"Selection");
+                    VARIANT lineArgument;
+                    VariantInit(&lineArgument);
+                    lineArgument.vt = VT_I4;
+                    lineArgument.lVal = std::max(line, 1);
+                    VARIANT gotoResult;
+                    invoke(selection.vt == VT_DISPATCH ? selection.pdispVal : nullptr, L"GotoLine", DISPATCH_METHOD, {lineArgument}, gotoResult);
+                    VariantClear(&gotoResult);
+                    VariantClear(&selection);
+                    VariantClear(&document);
+                    VARIANT activateResult;
+                    invoke(mainWindow.vt == VT_DISPATCH ? mainWindow.pdispVal : nullptr, L"Activate", DISPATCH_METHOD, {}, activateResult);
+                    VariantClear(&activateResult);
+                }
+            }
+            VariantClear(&caption);
+            VariantClear(&mainWindow);
+            VariantClear(&solutionName);
+            VariantClear(&solution);
+        }
+        if (studio != nullptr)
+            studio->Release();
+        if (unknown != nullptr)
+            unknown->Release();
+        moniker->Release();
+    }
+    bindContext->Release();
+    monikers->Release();
+    table->Release();
+    return isOpened;
+#else
     return false;
 #endif
 }
@@ -204,8 +349,9 @@ bool IdeLauncher::launch(const std::wstring &commandLine) {
 }
 
 
-// Открыть файл (полный путь) на строке; error - почему не вышло
-bool IdeLauncher::openFile(const std::wstring &commandTemplate, const std::wstring &projectRoot, const std::wstring &file, int line, std::wstring &error) {
+// Открыть файл (полный путь) на строке; ideKind - 0 Qt Creator, 1 Visual Studio, 2 своя команда; error - почему не вышло (или что идёт)
+bool IdeLauncher::openFile(int ideKind, const std::wstring &commandTemplate, const std::wstring &projectRoot, const std::wstring &file, int line,
+                           std::wstring &error) {
     // Проект для Qt Creator: CMakeLists.txt или первый .pro в корне
     std::error_code errorCode;
     std::filesystem::path project;
@@ -223,8 +369,47 @@ bool IdeLauncher::openFile(const std::wstring &commandTemplate, const std::wstri
     std::wstring projectPath = project.empty() ? std::wstring() : project.make_preferred().wstring();
     std::wstring lineText = std::to_wstring(std::max(line, 1));
 
+    // Visual Studio: в запущенную с этим проектом; нет такой - новая с папкой проекта, файл открывается из потока, когда она поднимется
+    if (ideKind == 1) {
+#ifdef _WIN32
+        CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        AllowSetForegroundWindow(ASFW_ANY);
+        if (openInRunningVisualStudio(projectRoot, filePath, line))
+            return true;
+        std::filesystem::path studio = findVisualStudio();
+        if (studio.empty()) {
+            error = L"Visual Studio не найдена в Program Files";
+            return false;
+        }
+        if (!launch(L"\"" + studio.make_preferred().wstring() + L"\" \"" + std::filesystem::path(projectRoot).make_preferred().wstring() + L"\"")) {
+            error = L"Visual Studio не запустилась: " + studio.wstring();
+            return false;
+        }
+        std::thread([projectRoot, filePath, line]() {
+            // Ждём, пока поднимется и откроет папку: до двух минут, проверка раз в секунду
+            constexpr int maxAttempts = 120;
+            CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+            for (int attempt = 0; attempt < maxAttempts; ++attempt) {
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+                if (openInRunningVisualStudio(projectRoot, filePath, line))
+                    break;
+            }
+            CoUninitialize();
+        }).detach();
+        error = L"Visual Studio запускается, файл откроется, когда она поднимется";
+        return true;
+#else
+        error = L"Visual Studio - только под Windows";
+        return false;
+#endif
+    }
+
     // Своя команда: подстановка {file}, {line}, {project}
-    if (!commandTemplate.empty()) {
+    if (ideKind == 2) {
+        if (commandTemplate.empty()) {
+            error = L"Своя команда IDE в настройках пустая";
+            return false;
+        }
         std::wstring command = commandTemplate;
         for (const auto &[placeholder, value] : std::vector<std::pair<std::wstring, std::wstring>>{{L"{file}", filePath}, {L"{line}", lineText},
                                                                                                    {L"{project}", projectPath}}) {

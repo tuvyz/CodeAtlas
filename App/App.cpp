@@ -438,14 +438,18 @@ void App::createSettingsWindow() {
            [](double value) {settings().scanThreads = int(std::lround(value));},
            [](double value) {return value < 0.5 ? std::wstring(L"авто") : std::to_wstring(int(std::lround(value)));});
 
-    // Команда IDE: пусто - Qt Creator, найденный сам
+    // IDE для «Открыть в IDE»: Qt Creator, Visual Studio или своя команда
     y += 8;
     addSection(L"IDE");
+    addRow(L"Открывать в", L"Qt Creator и Visual Studio находятся сами: файл открывается в той, где уже открыт этот проект, нет такой - "
+                           L"запускается новая с проектом. Своя команда - строкой ниже",
+           0, 2, 1, []() {return double(settings().ideKind);}, [](double value) {settings().ideKind = int(std::lround(value));},
+           [](double value) {int kind = int(std::lround(value)); return std::wstring(kind == 0 ? L"Qt" : kind == 1 ? L"VS" : L"своя");});
     {
         auto *ideEdit = new vgui::LineEdit(vgui::MySize<double>(windowWidth - 2 * left, 32), glm::dvec2(left, y), fixedSize, inParent, glm::dvec2(0, 0),
                                            settings().ideCommand);
-        ideEdit->setToolTip(L"Команда открытия файла: {file} - файл, {line} - строка, {project} - CMakeLists.txt или .pro проекта. "
-                            L"Пусто - Qt Creator: уже открыт - файл откроется в нём, нет - запустится с проектом");
+        ideEdit->setToolTip(L"Своя команда открытия файла: {file} - файл, {line} - строка, {project} - CMakeLists.txt или .pro проекта. "
+                            L"Например code -g \"{file}:{line}\"");
         settingsWindow->addChild(ideEdit);
         ideEdit->eventManager().subscribe<vgui::LineEdit::TextChanged_Event>(this, [this](const vgui::LineEdit::TextChanged_Event &event) {
             settings().ideCommand = event.text;
@@ -454,7 +458,9 @@ void App::createSettingsWindow() {
         settingsRowUpdaters.push_back([ideEdit]() {ideEdit->setText(settings().ideCommand);});
         y += 38;
         std::filesystem::path qtCreator = IdeLauncher::findQtCreator();
-        std::wstring found = qtCreator.empty() ? L"Пусто - Qt Creator; не найден, нужна команда" : L"Пусто - Qt Creator: " + qtCreator.generic_wstring();
+        std::filesystem::path visualStudio = IdeLauncher::findVisualStudio();
+        std::wstring found = L"Qt Creator: " + (qtCreator.empty() ? std::wstring(L"не найден") : qtCreator.generic_wstring()) + L"\nVisual Studio: " +
+                             (visualStudio.empty() ? std::wstring(L"не найдена") : visualStudio.generic_wstring());
         for (const std::wstring &line : wrapText(found, 50)) {
             auto *hint = new vgui::Label(vgui::MySize<double>(windowWidth - 2 * left, 20), glm::dvec2(left, y), fixedSize, inParent, glm::dvec2(0, 0), line);
             hint->setFontSize(12);
@@ -563,7 +569,7 @@ void App::openInIde(const std::wstring &file, int line) {
         return;
     std::wstring error;
     std::wstring fullPath = (std::filesystem::path(project.root) / file).lexically_normal().wstring();
-    if (IdeLauncher::openFile(settings().ideCommand, project.root, fullPath, line, error))
+    if (IdeLauncher::openFile(settings().ideKind, settings().ideCommand, project.root, fullPath, line, error) && error.empty())
         statusLabel->setText(L"Открыто в IDE: " + std::filesystem::path(file).filename().wstring() + L":" + std::to_wstring(line));
     else
         statusLabel->setText(error);

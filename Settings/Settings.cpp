@@ -65,6 +65,8 @@ void Settings::load() {
             wheelZoomStep = std::clamp(value, 5.0, 60.0);
         else if (key == "scan_threads")
             scanThreads = std::clamp(int(value), 0, 64);
+        else if (key == "ide_kind")
+            ideKind = std::clamp(int(value), 0, 2);
         else if (key == "node_size_mode")
             nodeSizeMode = std::clamp(int(value), 0, 2);
         else if (key == "lines_per_step")
@@ -86,6 +88,7 @@ bool Settings::save() const {
          << "scan_threads: " << scanThreads << '\n'
          << "node_size_mode: " << nodeSizeMode << '\n'
          << "lines_per_step: " << linesPerStep << '\n'
+         << "ide_kind: " << ideKind << '\n'
          << "ide_command: " << wstringToString(ideCommand) << '\n';
     return bool(file);
 }

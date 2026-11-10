@@ -72,6 +72,8 @@ if(WIN32)
         opengl32
         Comdlg32
         Shell32
+        Ole32
+        OleAut32
     )
 
     # SDL2.dll и libclang.dll рядом с exe (встроенные заголовки clang ищутся в CODEATLAS_LLVM_DIR - см. Analyzer::findClangResourceDir)
