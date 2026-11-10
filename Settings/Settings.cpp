@@ -47,7 +47,7 @@ void Settings::load() {
         if (key == "file_title_size")
             fileTitleSize = std::clamp(value, 12.0, 120.0);
         else if (key == "folder_title_size")
-            folderTitleSize = std::clamp(value, 12.0, 80.0);
+            folderTitleSize = std::clamp(value, 12.0, 300.0);
         else if (key == "node_text_size")
             nodeTextSize = std::clamp(value, 9.0, 32.0);
         else if (key == "note_text_size")

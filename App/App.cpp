@@ -417,7 +417,7 @@ void App::createSettingsWindow() {
     addRow(L"Имя файла", L"Высота имени файла, единицы холста (при масштабе 1 - пиксели): масштабируется вместе с картой; полоса имени и рамка растут под него",
            12, 120, 1, []() {return settings().fileTitleSize;}, [](double value) {settings().fileTitleSize = value;}, whole, true);
     addRow(L"Имя папки", L"Высота имени папки верхнего уровня, единицы холста (вложенные мельче): масштабируется вместе с картой",
-           12, 80, 1, []() {return settings().folderTitleSize;}, [](double value) {settings().folderTitleSize = value;}, whole, true);
+           12, 300, 1, []() {return settings().folderTitleSize;}, [](double value) {settings().folderTitleSize = value;}, whole, true);
     addRow(L"Имя в блоке", L"Высота имени функции или типа, единицы холста; блок растёт вместе с ним",
            9, 32, 1, []() {return settings().nodeTextSize;}, [](double value) {settings().nodeTextSize = value;}, whole, true);
     addRow(L"Текст пометки", L"Высота текста пометок, единицы холста", 9, 40, 1, []() {return settings().noteTextSize;}, [](double value) {settings().noteTextSize = value;}, whole);
