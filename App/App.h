@@ -5,6 +5,7 @@
 #include <vector>
 #include <atomic>
 #include <thread>
+#include <functional>
 #include <cwctype>
 #include <filesystem>
 #include <GL/glew.h>
@@ -17,6 +18,7 @@
 #include "Layout/Layout.h"
 #include "History/History.h"
 #include "Canvas/MapView.h"
+#include "Settings/Settings.h"
 #include "Global/Logging_Fmt.h"
 
 
@@ -68,6 +70,11 @@ private:
     vgui::Slider *historySlider = nullptr;
     vgui::Label *historyLabel = nullptr;
     vgui::CheckBox *diffCheck = nullptr;
+    vgui::ScrollAreaWidget *settingsWindow = nullptr;
+    std::vector<std::function<void()>> settingsRowUpdaters; // Ползунки и подписи окна настроек - под текущие значения (после сброса)
+    bool isSettingsChanged = false;                          // Настройки менялись: сохранить при закрытии окна и при выходе
+    std::map<std::string, glm::dvec2> settingsBasePositions; // Места узлов до правки размеров в окне настроек (раздвигание - от них)
+    bool hasSettingsBase = false;
 
     bool isDetailsDirty = true;      // Пересобрать окно описания (после событий: кнопки в нём удаляются)
     std::string pendingSelectId;     // Выбрать узел по щелчку в окне описания (после событий)
@@ -82,6 +89,12 @@ private:
     bool initWindow();
     // Окна интерфейса
     void createGui();
+    // Окно настроек: размеры на холсте, колесо, разбор; правки видны сразу
+    void createSettingsWindow();
+    // Закрыть окно настроек и сохранить их, если менялись
+    void closeSettingsWindow();
+    // Размеры рамок и блоков сменились: раздвинуть наложения от мест до правки (уменьшение размеров возвращает соседей)
+    void separateAfterSizeChange();
     // Размеры окон интерфейса под окно программы
     void updateGuiGeometry();
 
@@ -91,6 +104,8 @@ private:
     void showSnapshot(int snapshotIndex);
     // Сохранить раскладку с видом камеры
     void saveLayout();
+    // Разложить карту заново (с отменой по Ctrl+Z)
+    void relayoutMap();
 
     // Сканирование в потоке и его ход
     void startScan();

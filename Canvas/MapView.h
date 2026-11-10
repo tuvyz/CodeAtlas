@@ -122,12 +122,14 @@ private:
         LayoutRect rect;
         std::vector<int> nodes;
         int colorIndex = 0;
+        float farLabelAppearZoom = 1e9f; // С какого масштаба видна дальняя подпись (помещается в ширину)
     };
     struct FolderArea {
         std::wstring path;
         LayoutRect rect;
         int depth = 1;
         int colorIndex = 0;
+        float farLabelAppearZoom = 1e9f;
     };
     std::vector<FileFrame> frames;
     std::vector<FolderArea> folders;
@@ -146,6 +148,8 @@ private:
     glm::ivec2 pressScreen{0, 0};
     bool isDragMoved = false;
     std::vector<std::pair<std::string, glm::dvec2>> dragOriginalPositions;
+    std::map<std::string, glm::dvec2> dragBasePositions;  // Места всех узлов до перетаскивания (соседи расступаются от них)
+    std::set<std::string> dragPinnedIds;                  // Перетаскиваемые узлы
     glm::dvec2 dragOriginalNotePosition{0, 0};
 
     // Правки раскладки для отмены
@@ -162,11 +166,12 @@ private:
     // Связь кривой от узла к узлу; badge - номер вызова у дальнего от выбранного конца (0 - без номера)
     void addEdge(int fromNode, int toNode, EdgeKind kind, bool isHighlighted, int badge, bool isBadgeAtTarget);
 
-    // Что под точкой холста: узел, пометка, полоса имени файла, полоса имени папки (-1 - ничего)
+    // Что под точкой холста: узел, пометка, полоса имени файла, полоса имени папки (-1 - ничего). Издали полоса имени выше -
+    // под дальнюю подпись; isFarLabelOnly - только когда дальняя подпись видна
     int hitNode(glm::dvec2 world) const;
     int hitNote(glm::dvec2 world) const;
-    int hitFrameHeader(glm::dvec2 world) const;
-    int hitFolderHeader(glm::dvec2 world) const;
+    int hitFrameHeader(glm::dvec2 world, bool isFarLabelOnly) const;
+    int hitFolderHeader(glm::dvec2 world, bool isFarLabelOnly) const;
 
     // Начать перетаскивание узлов: запомнить их места
     void beginNodesDrag(const std::vector<int> &nodes);

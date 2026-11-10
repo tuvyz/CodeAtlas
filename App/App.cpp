@@ -254,12 +254,12 @@ void App::createGui() {
     scanProgress->setVisible(false);
     topBar->addChild(scanProgress);
 
-    auto *searchTitle = new vgui::Label(vgui::MySize<double>(70, 30), glm::dvec2(-666, 13), fixedSize, inParent, glm::dvec2(0, 0), L"Найти");
+    auto *searchTitle = new vgui::Label(vgui::MySize<double>(70, 30), glm::dvec2(-710, 13), fixedSize, inParent, glm::dvec2(0, 0), L"Найти");
     searchTitle->setFontSize(13);
     searchTitle->setTextColor(mutedColor);
     topBar->addChild(searchTitle);
 
-    searchEdit = new vgui::LineEdit(vgui::MySize<double>(240, 34), glm::dvec2(-596, 11), fixedSize, inParent);
+    searchEdit = new vgui::LineEdit(vgui::MySize<double>(240, 34), glm::dvec2(-640, 11), fixedSize, inParent);
     searchEdit->setToolTip(L"Имя функции или типа; Enter - к следующему найденному");
     topBar->addChild(searchEdit);
     searchEdit->eventManager().subscribe<vgui::LineEdit::TextChanged_Event>(this, [this](const vgui::LineEdit::TextChanged_Event &event) {
@@ -276,9 +276,21 @@ void App::createGui() {
             mapView.invalidate();
         });
     };
-    addFilter(callsCheck, -342, L"Вызовы", true, L"Связи вызовов: от вызывающей функции к вызываемой, с номером по порядку в теле", &mapView.isCallsShown);
-    addFilter(dataCheck, -234, L"Данные", true, L"Чтение (синие) и запись (оранжевые) полей и компонентов", &mapView.isDataShown);
-    addFilter(allEdgesCheck, -126, L"Все связи", false, L"Связи всех блоков, а не только выбранного", &mapView.isAllEdgesShown);
+    addFilter(callsCheck, -386, L"Вызовы", true, L"Связи вызовов: от вызывающей функции к вызываемой, с номером по порядку в теле", &mapView.isCallsShown);
+    addFilter(dataCheck, -278, L"Данные", true, L"Чтение (синие) и запись (оранжевые) полей и компонентов", &mapView.isDataShown);
+    addFilter(allEdgesCheck, -170, L"Все связи", false, L"Связи всех блоков, а не только выбранного", &mapView.isAllEdgesShown);
+
+    // Настройки: открыть и закрыть окно
+    auto *settingsButton = new vgui::Button(vgui::MySize<double>(36, 34), glm::dvec2(-50, 11), fixedSize, inParent);
+    settingsButton->setContextImage((resourceDir() / "Icons" / "Settings.png").wstring());
+    settingsButton->setToolTip(L"Настройки");
+    topBar->addChild(settingsButton);
+    settingsButton->eventManager().subscribe<vgui::Button::Click_Event>(this, [this](const vgui::Button::Click_Event &) {
+        if (settingsWindow->visible())
+            closeSettingsWindow();
+        else
+            settingsWindow->setVisible(true);
+    });
 
     // Окно описания справа
     detailsPanel = new vgui::ScrollAreaWidget(vgui::MySize<double>(detailsWidth, 1080 - topBarHeight - 2 * edgeGap),
@@ -320,7 +332,159 @@ void App::createGui() {
         isDetailsDirty = true;
     });
 
+    createSettingsWindow();
     updateGuiGeometry();
+}
+
+
+// Окно настроек: размеры на холсте, колесо, разбор; правки видны сразу
+void App::createSettingsWindow() {
+    constexpr double windowWidth = 440;
+    constexpr double left = 18;
+    constexpr double sliderLeft = 210;
+    constexpr double sliderWidth = 150;
+    double y = 14;
+
+    // Поверх окна описания, у правого края под верхней полосой
+    settingsWindow = new vgui::ScrollAreaWidget(vgui::MySize<double>(windowWidth, 600), glm::dvec2(-edgeGap, topBarHeight + edgeGap), fixedSize, inWindow,
+                                                glm::dvec2(1, 0), L"Настройки");
+    settingsWindow->enableScrollersHor(false);
+    settingsWindow->setCloseability(true);
+    settingsWindow->setVisible(false);
+    gui->addGuiObject(settingsWindow);
+    settingsWindow->eventManager().subscribe<vgui::ScrollAreaWidget::CloseWindow_Event>(this, [this](const vgui::ScrollAreaWidget::CloseWindow_Event &) {
+        closeSettingsWindow();
+    });
+
+    auto addSection = [&](const std::wstring &title) {
+        auto *label = new vgui::Label(vgui::MySize<double>(windowWidth - 2 * left, 20), glm::dvec2(left, y), fixedSize, inParent, glm::dvec2(0, 0), title);
+        label->setFontSize(12);
+        label->setTextColor(mutedColor);
+        settingsWindow->addChild(label);
+        y += 26;
+    };
+    // Строка: подпись, ползунок, значение (чтение и запись настройки, вид значения)
+    // isLayoutSize - размер меняет рамки и блоки (наложения раздвигаются)
+    auto addRow = [&](const std::wstring &title, const std::wstring &toolTip, double minimum, double maximum, double step, std::function<double()> get,
+                      std::function<void(double)> set, std::function<std::wstring(double)> format, bool isLayoutSize = false) {
+        auto *label = new vgui::Label(vgui::MySize<double>(sliderLeft - left - 8, 30), glm::dvec2(left, y), fixedSize, inParent, glm::dvec2(0, 0), title);
+        label->setFontSize(14);
+        label->setToolTip(toolTip);
+        settingsWindow->addChild(label);
+
+        auto *slider = new vgui::Slider(vgui::MySize<double>(sliderWidth, 26), glm::dvec2(sliderLeft, y + 2), fixedSize, inParent);
+        slider->setRange(minimum, maximum, step);
+        slider->setToolTip(toolTip);
+        settingsWindow->addChild(slider);
+
+        auto *valueLabel = new vgui::Label(vgui::MySize<double>(windowWidth - sliderLeft - sliderWidth - 24, 30), glm::dvec2(sliderLeft + sliderWidth + 12, y),
+                                           fixedSize, inParent);
+        valueLabel->setFontSize(14);
+        valueLabel->setTextColor(mutedColor);
+        settingsWindow->addChild(valueLabel);
+
+        std::function<void()> update = [slider, valueLabel, get, format]() {
+            slider->setValue(get());
+            valueLabel->setText(format(get()));
+        };
+        update();
+        settingsRowUpdaters.push_back(update);
+        slider->eventManager().subscribe<vgui::Slider::ValueChanged_Event>(this, [this, valueLabel, set, format, isLayoutSize](const vgui::Slider::ValueChanged_Event &event) {
+            set(event.value);
+            valueLabel->setText(format(event.value));
+            isSettingsChanged = true;
+            if (isLayoutSize)
+                separateAfterSizeChange();
+            mapView.invalidate();
+        });
+        y += 38;
+    };
+    auto whole = [](double value) {return std::to_wstring(int(std::lround(value)));};
+    auto tenths = [](double value) {
+        int tenthsCount = int(std::lround(value * 10));
+        return std::to_wstring(tenthsCount / 10) + L"." + std::to_wstring(tenthsCount % 10);
+    };
+
+    addSection(L"ХОЛСТ");
+    addRow(L"Имя файла", L"Высота имени файла вблизи, единицы холста (при масштабе 1 - пиксели); полоса имени растёт вместе с ним",
+           12, 120, 1, []() {return settings().fileTitleSize;}, [](double value) {settings().fileTitleSize = value;}, whole, true);
+    addRow(L"Имя файла издали", L"Высота имени файла на дальнем виде, пиксели экрана", 10, 60, 1, []() {return settings().fileFarSize;}, [](double value) {settings().fileFarSize = value;}, whole);
+    addRow(L"Имя папки", L"Высота имени папки верхнего уровня вблизи, единицы холста (вложенные мельче)",
+           12, 80, 1, []() {return settings().folderTitleSize;}, [](double value) {settings().folderTitleSize = value;}, whole, true);
+    addRow(L"Имя папки издали", L"Высота имени папки верхнего уровня на дальнем виде, пиксели экрана",
+           10, 48, 1, []() {return settings().folderFarSize;}, [](double value) {settings().folderFarSize = value;}, whole);
+    addRow(L"Имя в блоке", L"Высота имени функции или типа, единицы холста; блок растёт вместе с ним",
+           9, 32, 1, []() {return settings().nodeTextSize;}, [](double value) {settings().nodeTextSize = value;}, whole, true);
+    addRow(L"Текст пометки", L"Высота текста пометок, единицы холста", 9, 40, 1, []() {return settings().noteTextSize;}, [](double value) {settings().noteTextSize = value;}, whole);
+    addRow(L"Толщина связей", L"Толщина линий связей, пиксели экрана (у выбранного блока - в 1.6 раза толще)",
+           0.5, 5, 0.1, []() {return settings().edgeThickness;}, [](double value) {settings().edgeThickness = value;}, tenths);
+    addRow(L"Шаг колеса, %", L"На сколько процентов меняется масштаб за щелчок колеса", 5, 60, 1, []() {return settings().wheelZoomStep;}, [](double value) {settings().wheelZoomStep = value;}, whole);
+
+    y += 8;
+    addSection(L"РАЗБОР");
+    addRow(L"Потоков", L"Сколько единиц разбирается одновременно; авто - половина ядер, не больше 8. Больше потоков - быстрее, но больше памяти",
+           0, std::clamp(int(std::thread::hardware_concurrency()), 1, 64), 1, []() {return double(settings().scanThreads);},
+           [](double value) {settings().scanThreads = int(std::lround(value));},
+           [](double value) {return value < 0.5 ? std::wstring(L"авто") : std::to_wstring(int(std::lround(value)));});
+
+    y += 6;
+    for (const std::wstring &line : wrapText(L"Рамки, налезшие друг на друга от крупных имён, расступаются сами. «Разложить заново» - вся карта "
+                                             L"с нуля (Ctrl+Z - вернуть как было).", 50)) {
+        auto *hint = new vgui::Label(vgui::MySize<double>(windowWidth - 2 * left, 20), glm::dvec2(left, y), fixedSize, inParent, glm::dvec2(0, 0), line);
+        hint->setFontSize(12);
+        hint->setTextColor(mutedColor);
+        settingsWindow->addChild(hint);
+        y += 19;
+    }
+
+    y += 12;
+    auto *relayoutButton = new vgui::Button(vgui::MySize<double>(190, 32), glm::dvec2(left, y), fixedSize, inParent, glm::dvec2(0, 0), L"Разложить заново");
+    relayoutButton->setFontSize(14);
+    settingsWindow->addChild(relayoutButton);
+    relayoutButton->eventManager().subscribe<vgui::Button::Click_Event>(this, [this](const vgui::Button::Click_Event &) {relayoutMap();});
+
+    auto *resetButton = new vgui::Button(vgui::MySize<double>(170, 32), glm::dvec2(windowWidth - left - 170, y), fixedSize, inParent, glm::dvec2(0, 0),
+                                         L"По умолчанию");
+    resetButton->setFontSize(14);
+    settingsWindow->addChild(resetButton);
+    resetButton->eventManager().subscribe<vgui::Button::Click_Event>(this, [this](const vgui::Button::Click_Event &) {
+        settings() = Settings();
+        for (std::function<void()> &update : settingsRowUpdaters)
+            update();
+        isSettingsChanged = true;
+        separateAfterSizeChange();
+        mapView.invalidate();
+    });
+    y += 32 + 18;
+
+    settingsWindow->setStandardWidgetSize(vgui::MySize<double>(windowWidth, y + 30));
+}
+
+// Размеры рамок и блоков сменились: раздвинуть наложения от мест до правки (уменьшение размеров возвращает соседей)
+void App::separateAfterSizeChange() {
+    if (mapView.graph == nullptr)
+        return;
+    if (!hasSettingsBase) {
+        mapView.pushUndo();
+        settingsBasePositions = layout.nodePositions;
+        hasSettingsBase = true;
+    }
+    layout.nodePositions = settingsBasePositions;
+    layout.separate(*mapView.graph);
+}
+
+// Закрыть окно настроек и сохранить их, если менялись
+void App::closeSettingsWindow() {
+    settingsWindow->setVisible(false);
+    if (hasSettingsBase) {
+        hasSettingsBase = false;
+        saveLayout();
+    }
+    if (isSettingsChanged) {
+        isSettingsChanged = false;
+        if (!settings().save())
+            statusLabel->setText(L"Настройки не сохранились: нет записи в " + Settings::filePath().generic_wstring());
+    }
 }
 
 
@@ -341,7 +505,7 @@ bool App::isCursorOverGui() {
     if (gui->context().popupObject() != nullptr)
         return true;
     return topBar->cursorInWidget() || (detailsPanel->visible() && detailsPanel->cursorInWidget()) ||
-           (historyBar->visible() && historyBar->cursorInWidget());
+           (historyBar->visible() && historyBar->cursorInWidget()) || (settingsWindow->visible() && settingsWindow->cursorInWidget());
 }
 
 
@@ -353,6 +517,20 @@ void App::saveLayout() {
     layout.cameraZoom = mapView.zoom;
     layout.hasCamera = true;
     layout.save((std::filesystem::path(project.dataDir) / "layout.txt").wstring());
+}
+
+
+// Разложить карту заново (с отменой по Ctrl+Z)
+void App::relayoutMap() {
+    if (mapView.graph == nullptr)
+        return;
+    mapView.pushUndo();
+    layout.relayout(*mapView.graph);
+    hasSettingsBase = false;
+    saveLayout();
+    mapView.fitAll();
+    mapView.invalidate();
+    statusLabel->setText(L"Разложено заново (Ctrl+Z - вернуть)");
 }
 
 
@@ -431,13 +609,19 @@ void App::showSnapshot(int snapshotIndex) {
     mapView.previousGraph = &previousGraph;
     mapView.isDiffShown = diffCheck->getState() && snapshotIndex > 0;
 
-    // Новые узлы - на свободные места; раскладки не было - вид на всю карту
+    // Новые узлы - на свободные места; раскладки не было - вид на всю карту. Налезшее друг на друга (старая раскладка при других
+    // размерах, выросшие файлы) раздвигается вправо и вниз
     bool hadPositions = !layout.nodePositions.empty();
-    if (layout.placeNewNodes(shownGraph) > 0) {
+    int placedCount = layout.placeNewNodes(shownGraph);
+    int separatedCount = layout.separate(shownGraph);
+    hasSettingsBase = false;
+    if (placedCount > 0 || separatedCount > 0) {
         saveLayout();
         if (!hadPositions)
             mapView.fitAll(true);
     }
+    if (separatedCount > 0)
+        Debug() << "CodeAtlas: раздвинуто наложений" << separatedCount;
 
     mapView.selectedNode = selectedId.empty() ? -1 : shownGraph.findNode(selectedId);
     mapView.hoveredNode = -1;
@@ -474,6 +658,7 @@ void App::startScan() {
     }
     project.load(project.root);
     scanProject = project;
+    analyzer.threadsCount = settings().scanThreads;
     isScanFinished = false;
     isScanning = true;
     scanButton->setText(L"Остановить");
@@ -768,12 +953,8 @@ void App::contextMenuChosen(int itemIndex) {
             mapView.selectedNode = -1;
         } else if (itemIndex == 1) {
             mapView.fitAll();
-        } else if (mapView.graph != nullptr) {
-            mapView.pushUndo();
-            layout.relayout(*mapView.graph);
-            saveLayout();
-            mapView.fitAll();
-            statusLabel->setText(L"Разложено заново (Ctrl+Z - вернуть)");
+        } else {
+            relayoutMap();
         }
     }
     mapView.invalidate();
@@ -797,8 +978,10 @@ void App::handleCanvasKey(const SDL_KeyboardEvent &key) {
         mapView.fitAll();
         break;
     case SDLK_z:
-        if (isControl && mapView.undo())
+        if (isControl && mapView.undo()) {
+            hasSettingsBase = false;
             isDetailsDirty = true;
+        }
         break;
     case SDLK_DELETE:
         if (mapView.selectedNote >= 0)
@@ -822,6 +1005,7 @@ int App::run(const std::wstring &projectRoot) {
         setvbuf(stderr, nullptr, _IONBF, 0);
 #endif
     Debug() << "CodeAtlas: запуск";
+    settings().load();
     if (!initWindow())
         return 1;
     Debug() << "CodeAtlas: окно" << windowSize.x << "x" << windowSize.y << ", OpenGL" << reinterpret_cast<const char*>(glGetString(GL_VERSION));
@@ -884,6 +1068,7 @@ int App::run(const std::wstring &projectRoot) {
         }
         if (mapView.isLayoutChanged) {
             mapView.isLayoutChanged = false;
+            hasSettingsBase = false;
             saveLayout();
         }
         if (mapView.contextRequest.isRequested) {
@@ -928,6 +1113,8 @@ int App::run(const std::wstring &projectRoot) {
         scanThread.join();
     }
     saveLayout();
+    if (isSettingsChanged)
+        settings().save();
     delete gui;
     SDL_GL_DeleteContext(glContext);
     SDL_DestroyWindow(window);

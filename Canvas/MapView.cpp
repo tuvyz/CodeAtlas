@@ -55,6 +55,19 @@ std::wstring lastPathPart(const std::wstring &path) {
     return slash == std::wstring::npos ? path : path.substr(slash + 1);
 }
 
+// Имя папки по глубине: вблизи - единицы холста, издали - пиксели экрана (вложенные мельче)
+float folderTitleSize(int depth) {
+    return float(Layout::folderTitleSize()) * (depth == 1 ? 1.0f : depth == 2 ? 0.82f : 0.68f);
+}
+float folderFarSize(int depth) {
+    return float(settings().folderFarSize) * (depth == 1 ? 1.0f : depth == 2 ? 0.88f : 0.76f);
+}
+
+// Масштаб, с которого вместо дальней подписи (постоянного размера на экране) идёт ближняя (размером холста)
+constexpr float farLabelEndShare = 0.5625f;
+// Высота ближней подписи на экране, ниже которой она гаснет (если нет дальней), пиксели
+constexpr float minReadableSize = 14;
+
 } // namespace
 
 
@@ -102,8 +115,7 @@ void MapView::rebuildGeometry() {
             frames.push_back(frame);
     }
 
-    // Области папок до третьего уровня: рамки своих файлов и области подпапок с отступом и полосой имени, снизу вверх
-    constexpr int maxFolderDepth = 3;
+    // Области папок до Layout::maxFolderDepth уровня: рамки своих файлов и области подпапок с отступом и полосой имени, снизу вверх
     std::map<std::wstring, LayoutRect> rawAreas;   // Без отступов: рамки файлов и области подпапок
     std::map<std::wstring, bool> hasRawArea;
     std::map<std::wstring, int> areaColors;
@@ -123,7 +135,7 @@ void MapView::rebuildGeometry() {
         std::wstring folder;
         int depth = 0;
         size_t start = 0;
-        while (start < parent.size() && depth < maxFolderDepth) {
+        while (start < parent.size() && depth < Layout::maxFolderDepth) {
             size_t slash = parent.find(L'/', start);
             std::wstring part = parent.substr(start, slash == std::wstring::npos ? std::wstring::npos : slash - start);
             folder = folder.empty() ? part : folder + L"/" + part;
@@ -148,14 +160,24 @@ void MapView::rebuildGeometry() {
         area.path = path;
         area.depth = depthOf(path);
         area.colorIndex = areaColors[path];
-        area.rect = LayoutRect{raw.position - glm::dvec2(Layout::folderPadding, Layout::folderPadding + Layout::folderHeaderHeight),
-                               raw.size + glm::dvec2(2 * Layout::folderPadding, 2 * Layout::folderPadding + Layout::folderHeaderHeight)};
+        area.rect = LayoutRect{raw.position - glm::dvec2(Layout::folderPadding, Layout::folderPadding + Layout::folderHeaderHeight()),
+                               raw.size + glm::dvec2(2 * Layout::folderPadding, 2 * Layout::folderPadding + Layout::folderHeaderHeight())};
         folders.push_back(area);
         size_t slash = path.rfind(L'/');
         if (slash != std::wstring::npos)
             unite(path.substr(0, slash), area.rect);
     }
     std::sort(folders.begin(), folders.end(), [](const FolderArea &first, const FolderArea &second) {return first.depth < second.depth;});
+
+    // С какого масштаба видны дальние подписи: когда помещаются в ширину рамки (с частью зазора до соседней) или области папки;
+    // глубокие папки - не раньше своего масштаба
+    for (FileFrame &frame : frames)
+        frame.farLabelAppearZoom = (renderer.font.measure(lastPathPart(frame.file), float(settings().fileFarSize)) + 8) /
+                                   float(frame.rect.size.x + Layout::frameGap * 0.8);
+    for (FolderArea &area : folders) {
+        float depthAppearZoom = area.depth == 1 ? 0.0f : area.depth == 2 ? 0.3f : 0.36f;
+        area.farLabelAppearZoom = std::max(depthAppearZoom, (renderer.font.measure(lastPathPart(area.path), folderFarSize(area.depth)) + 24) / float(area.rect.size.x));
+    }
 }
 
 
@@ -201,7 +223,7 @@ void MapView::addEdge(int fromNode, int toNode, EdgeKind kind, bool isHighlighte
         color = hexColor(0x3478D4, isHighlighted ? 1.0f : 0.4f);
     else
         color = hexColor(0xE0802A, isHighlighted ? 1.0f : 0.45f);
-    float thickness = isHighlighted ? 1.8f : 1.1f;
+    float thickness = float(settings().edgeThickness) * (isHighlighted ? 1.64f : 1.0f);
 
     // Кривая отрезками
     constexpr int segmentsCount = 18;
@@ -284,17 +306,19 @@ void MapView::buildScene() {
         areaLayer.shapes.push_back(boxShape(area.rect, ShapeKind::RoundBox, 16, fill, border, 1));
         // Имя папки: вблизи - размером холста в полосе имени, издали - постоянного размера на экране (глубокие папки появляются ближе)
         glm::vec4 label = glm::mix(accent, glm::vec4(0, 0, 0, 1), 0.28f);
-        float labelSize = area.depth == 1 ? 22.0f : area.depth == 2 ? 18.0f : 15.0f;
-        float screenSize = area.depth == 1 ? 17.0f : area.depth == 2 ? 15.0f : 13.0f;
+        float labelSize = folderTitleSize(area.depth);
+        float screenSize = folderFarSize(area.depth);
         float switchZoom = screenSize / labelSize;
         // Издали имя появляется, только когда область на экране шире его (иначе имена соседних папок налезают друг на друга)
-        glm::vec2 labelPosition = glm::vec2(area.rect.position) + glm::vec2(18, Layout::folderHeaderHeight * 0.5f + 2);
+        glm::vec2 labelPosition = glm::vec2(area.rect.position) + glm::vec2(18, Layout::folderHeaderHeight() * 0.5f + 2);
         std::wstring name = lastPathPart(area.path);
-        float depthAppearZoom = area.depth == 1 ? 0.0f : area.depth == 2 ? 0.3f : 0.36f;
-        float appearZoom = std::max(depthAppearZoom, (font.measure(name, screenSize) + 24) / float(area.rect.size.x));
-        font.addText(areaLayer, name, labelPosition, labelSize, label, glm::vec2(switchZoom, 0), float(area.rect.size.x) - 36);
-        if (appearZoom < switchZoom * 0.5625f)
-            font.addText(overlayLayer, name, glm::vec2(area.rect.position), screenSize, label, glm::vec2(appearZoom, switchZoom * 0.5625f), 0, true,
+        // Дальнего имени нет (не помещается) - ближнее держится, пока читается
+        float appearZoom = area.farLabelAppearZoom;
+        bool hasFarLabel = appearZoom < switchZoom * farLabelEndShare;
+        float nearAppearZoom = hasFarLabel ? switchZoom : std::min(switchZoom, minReadableSize / labelSize);
+        font.addText(areaLayer, name, labelPosition, labelSize, label, glm::vec2(nearAppearZoom, 0), float(area.rect.size.x) - 36);
+        if (hasFarLabel)
+            font.addText(overlayLayer, name, glm::vec2(area.rect.position), screenSize, label, glm::vec2(appearZoom / 0.75f, switchZoom * farLabelEndShare), 0, true,
                          glm::vec2(8, screenSize * 0.5f + 5));
     }
 
@@ -308,25 +332,29 @@ void MapView::buildScene() {
 
         // Полоса имени: скруглённая сверху (нижние углы закрыты прямоугольником)
         glm::vec4 headerFill = glm::mix(hexColor(0xFFFFFF), color, 0.13f);
-        LayoutRect header{frame.rect.position + glm::dvec2(1.5, 1.5), glm::dvec2(frame.rect.size.x - 3, Layout::frameHeaderHeight - 4)};
+        LayoutRect header{frame.rect.position + glm::dvec2(1.5, 1.5), glm::dvec2(frame.rect.size.x - 3, Layout::frameHeaderHeight() - 4)};
         areaLayer.shapes.push_back(boxShape(header, ShapeKind::RoundBox, 7.5f, headerFill, glm::vec4(0), 0));
         LayoutRect headerBottom{header.position + glm::dvec2(0, header.size.y * 0.5), glm::dvec2(header.size.x, header.size.y * 0.5)};
         areaLayer.shapes.push_back(boxShape(headerBottom, ShapeKind::RoundBox, 0, headerFill, glm::vec4(0), 0));
 
-        // Имя файла целиком, без многоточий: вблизи - размером холста в полосе имени (рамка не уже имени), издали - 26 пикселей на экране
-        // в верху рамки, когда помещается в её ширину (с зазором до соседней рамки); не помещается - не пишется, пока не приблизить
-        constexpr float fileScreenSize = 26;
-        float titleSize = float(Layout::frameTitleSize);
+        // Имя файла целиком, без многоточий: вблизи - размером холста в полосе имени (рамка не уже имени), издали - постоянного размера
+        // на экране в верху рамки, когда помещается в её ширину (с зазором до соседней рамки); не помещается - не пишется, пока не приблизить
+        float fileScreenSize = float(settings().fileFarSize);
+        float titleSize = float(Layout::frameTitleSize());
         float switchZoom = fileScreenSize / titleSize;
         std::wstring name = lastPathPart(frame.file);
         glm::vec4 titleColor = glm::mix(color, glm::vec4(0, 0, 0, 1), 0.12f);
-        glm::vec2 namePosition = glm::vec2(frame.rect.position) + glm::vec2(Layout::framePadding, (Layout::frameHeaderHeight - 2) * 0.5f);
-        font.addText(areaLayer, name, namePosition, titleSize, titleColor, glm::vec2(switchZoom, 0));
-        // Подписи сменяют друг друга без наложения: дальняя гаснет к 0.75 масштаба смены, ближняя проявляется после; дальняя - поверх блоков
-        float appearZoom = (font.measure(name, fileScreenSize) + 8) / float(frame.rect.size.x + Layout::frameGap * 0.8);
-        float farLabelEndZoom = switchZoom * 0.75f * 0.75f;
-        if (appearZoom < farLabelEndZoom)
-            font.addText(overlayLayer, name, glm::vec2(frame.rect.position), fileScreenSize, titleColor, glm::vec2(appearZoom, farLabelEndZoom), 0, true,
+        glm::vec2 namePosition = glm::vec2(frame.rect.position) + glm::vec2(Layout::framePadding, (Layout::frameHeaderHeight() - 2) * 0.5f);
+        // Подписи сменяют друг друга без наложения: дальняя гаснет к 0.75 масштаба смены, ближняя проявляется после; дальняя - поверх блоков.
+        // Дальняя начинает проявляться только с масштаба, где уже помещается (проявление идёт от 0.75 до 1 границы - граница отодвинута);
+        // дальней нет - ближняя держится, пока читается
+        float appearZoom = frame.farLabelAppearZoom;
+        float farLabelEndZoom = switchZoom * farLabelEndShare;
+        bool hasFarLabel = appearZoom < farLabelEndZoom;
+        float nearAppearZoom = hasFarLabel ? switchZoom : std::min(switchZoom, minReadableSize / titleSize);
+        font.addText(areaLayer, name, namePosition, titleSize, titleColor, glm::vec2(nearAppearZoom, 0));
+        if (hasFarLabel)
+            font.addText(overlayLayer, name, glm::vec2(frame.rect.position), fileScreenSize, titleColor, glm::vec2(appearZoom / 0.75f, farLabelEndZoom), 0, true,
                          glm::vec2(8, fileScreenSize * 0.5f + 6));
     }
 
@@ -424,7 +452,7 @@ void MapView::buildScene() {
         } else if (shapeKind == ShapeKind::Parallelogram) {
             textLeft = 15;
         }
-        font.addText(nodeLayer, node.name, glm::vec2(rect.position) + glm::vec2(textLeft, float(rect.size.y) * 0.5f), float(Layout::nodeTextSize),
+        font.addText(nodeLayer, node.name, glm::vec2(rect.position) + glm::vec2(textLeft, float(rect.size.y) * 0.5f), float(Layout::nodeTextSize()),
                      text, glm::vec2(0.4f, 0), float(rect.size.x) - textLeft - 8);
     }
 
@@ -437,7 +465,7 @@ void MapView::buildScene() {
                 continue;
             LayoutRect rect{found->second, Layout::nodeSize(node)};
             nodeLayer.shapes.push_back(boxShape(rect, ShapeKind::DashedBox, 6, hexColor(0xF4F2ED, 0.6f), hexColor(0xB04848), 1.4f));
-            font.addText(nodeLayer, node.name, glm::vec2(rect.position) + glm::vec2(12, float(rect.size.y) * 0.5f), float(Layout::nodeTextSize),
+            font.addText(nodeLayer, node.name, glm::vec2(rect.position) + glm::vec2(12, float(rect.size.y) * 0.5f), float(Layout::nodeTextSize()),
                          hexColor(0xA05A5A), glm::vec2(0.4f, 0), float(rect.size.x) - 20);
         }
     }
@@ -453,10 +481,10 @@ void MapView::buildScene() {
                                                isSelected ? 2.2f : 1));
         std::wstringstream lines(note.text);
         std::wstring line;
-        float lineHeight = float(Layout::noteTextSize) * 1.35f;
+        float lineHeight = float(Layout::noteTextSize()) * 1.35f;
         float y = float(rect.position.y) + 10 + lineHeight * 0.5f;
         while (std::getline(lines, line)) {
-            font.addText(overlayLayer, line, glm::vec2(float(rect.position.x) + 14, y), float(Layout::noteTextSize), hexColor(0x4B3F12),
+            font.addText(overlayLayer, line, glm::vec2(float(rect.position.x) + 14, y), float(Layout::noteTextSize()), hexColor(0x4B3F12),
                          glm::vec2(0.15f, 0));
             y += lineHeight;
         }
@@ -501,21 +529,26 @@ void MapView::handleEvent(const SDL_Event &event, bool isCursorOverGui) {
             dragOriginalNotePosition = layout->notes[note].position;
             return;
         }
-        int node = hitNode(world);
+        // Издали подписи папок и файлов лежат поверх блоков и берутся первыми (полосы имён тогда - пара пикселей)
+        int folder = hitFolderHeader(world, true);
+        int frame = folder < 0 ? hitFrameHeader(world, true) : -1;
+        int node = folder < 0 && frame < 0 ? hitNode(world) : -1;
         if (node >= 0) {
             dragKind = DragKind::Node;
             dragIndex = node;
             beginNodesDrag({node});
             return;
         }
-        int frame = hitFrameHeader(world);
+        if (frame < 0 && folder < 0)
+            frame = hitFrameHeader(world, false);
         if (frame >= 0) {
             dragKind = DragKind::File;
             dragIndex = frame;
             beginNodesDrag(frames[frame].nodes);
             return;
         }
-        int folder = hitFolderHeader(world);
+        if (folder < 0)
+            folder = hitFolderHeader(world, false);
         if (folder >= 0) {
             dragKind = DragKind::Folder;
             dragIndex = folder;
@@ -538,6 +571,12 @@ void MapView::handleEvent(const SDL_Event &event, bool isCursorOverGui) {
                 isDragMoved = true;
                 if (dragKind != DragKind::Pan)
                     pushUndo();
+                if (dragKind == DragKind::Node || dragKind == DragKind::File || dragKind == DragKind::Folder) {
+                    dragBasePositions = layout->nodePositions;
+                    dragPinnedIds.clear();
+                    for (const auto &[id, position] : dragOriginalPositions)
+                        dragPinnedIds.insert(id);
+                }
             }
             if (!isDragMoved)
                 return;
@@ -549,8 +588,11 @@ void MapView::handleEvent(const SDL_Event &event, bool isCursorOverGui) {
                 layout->notes[dragIndex].position = dragOriginalNotePosition + (world - dragStartWorld);
                 invalidate();
             } else {
+                // Соседи расступаются от перетаскиваемого и возвращаются, когда он ушёл: каждый раз от мест до начала перетаскивания
+                layout->nodePositions = dragBasePositions;
                 for (const auto &[id, position] : dragOriginalPositions)
                     layout->nodePositions[id] = position + (world - dragStartWorld);
+                layout->separate(*graph, dragPinnedIds);
                 invalidate();
             }
             return;
@@ -606,7 +648,7 @@ void MapView::handleEvent(const SDL_Event &event, bool isCursorOverGui) {
         SDL_GetMouseState(&mouseX, &mouseY);
         glm::dvec2 mouse(mouseX, mouseY);
         glm::dvec2 worldUnderCursor = screenToWorld(mouse);
-        zoom = std::clamp(zoom * std::pow(1.18, double(event.wheel.y)), 0.02, 4.0);
+        zoom = std::clamp(zoom * std::pow(1 + settings().wheelZoomStep / 100, double(event.wheel.y)), 0.02, 4.0);
         cameraCenter = worldUnderCursor - (mouse - glm::dvec2(viewport) * 0.5) / zoom;
         targetCenter = cameraCenter;
         targetZoom = zoom;
@@ -802,20 +844,33 @@ int MapView::hitNote(glm::dvec2 world) const {
     return -1;
 }
 
-int MapView::hitFrameHeader(glm::dvec2 world) const {
+int MapView::hitFrameHeader(glm::dvec2 world, bool isFarLabelOnly) const {
+    double farLabelEndZoom = settings().fileFarSize / Layout::frameTitleSize() * farLabelEndShare;
+    if (isFarLabelOnly && zoom >= farLabelEndZoom)
+        return -1;
     for (int frameIndex = 0; frameIndex < int(frames.size()); ++frameIndex) {
-        LayoutRect header{frames[frameIndex].rect.position, glm::dvec2(frames[frameIndex].rect.size.x, Layout::frameHeaderHeight)};
+        bool isFarLabelShown = zoom >= frames[frameIndex].farLabelAppearZoom && zoom < farLabelEndZoom;
+        if (isFarLabelOnly && !isFarLabelShown)
+            continue;
+        double height = isFarLabelShown ? std::max(Layout::frameHeaderHeight(), (settings().fileFarSize + 14) / zoom) : Layout::frameHeaderHeight();
+        LayoutRect header{frames[frameIndex].rect.position, glm::dvec2(frames[frameIndex].rect.size.x, std::min(height, frames[frameIndex].rect.size.y))};
         if (header.contains(world))
             return frameIndex;
     }
     return -1;
 }
 
-int MapView::hitFolderHeader(glm::dvec2 world) const {
+int MapView::hitFolderHeader(glm::dvec2 world, bool isFarLabelOnly) const {
     int found = -1;
     for (int folderIndex = 0; folderIndex < int(folders.size()); ++folderIndex) {
-        LayoutRect header{folders[folderIndex].rect.position, glm::dvec2(folders[folderIndex].rect.size.x, Layout::folderHeaderHeight)};
-        if (header.contains(world) && (found < 0 || folders[folderIndex].depth > folders[found].depth))
+        const FolderArea &area = folders[folderIndex];
+        double farLabelEndZoom = folderFarSize(area.depth) / folderTitleSize(area.depth) * farLabelEndShare;
+        bool isFarLabelShown = zoom >= area.farLabelAppearZoom && zoom < farLabelEndZoom;
+        if (isFarLabelOnly && !isFarLabelShown)
+            continue;
+        double height = isFarLabelShown ? std::max(Layout::folderHeaderHeight(), (folderFarSize(area.depth) + 12) / zoom) : Layout::folderHeaderHeight();
+        LayoutRect header{area.rect.position, glm::dvec2(area.rect.size.x, std::min(height, area.rect.size.y))};
+        if (header.contains(world) && (found < 0 || area.depth > folders[found].depth))
             found = folderIndex;
     }
     return found;

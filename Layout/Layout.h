@@ -14,6 +14,7 @@
 #include <glm/glm.hpp>
 #include "Graph/Graph.h"
 #include "Global/Strings.h"
+#include "Settings/Settings.h"
 
 
 // Пометка на холсте
@@ -37,23 +38,25 @@ struct LayoutRect {
 };
 
 
-// Раскладка карты: места блоков, пометки и вид камеры. Хранится в <проект>/.codeatlas/layout.txt и не перестраивается сама:
+// Раскладка карты: места блоков, пометки и вид камеры. Хранится в layout.txt папки проекта у CodeAtlas и не перестраивается сама:
 // раскладываются только новые блоки, места пропавших узлов остаются (узел вернётся на старое место, история рисует его призрак там же)
 class Layout {
 public:
-    // Размеры на холсте, единицы холста (при масштабе 1 - пиксели)
-    static constexpr double nodeHeight = 30;          // Высота блока
-    static constexpr double nodeTextSize = 13;        // Высота шрифта имени в блоке
-    static constexpr double nodeCharWidth = 7.8;      // Ширина знака имени (моноширинный шрифт, 0.6 высоты)
+    // Размеры на холсте, единицы холста (при масштабе 1 - пиксели). Размеры подписей - из настроек программы, полосы и блоки - от них
     static constexpr double nodeGapX = 18;            // Зазор между столбцами блоков в рамке файла
     static constexpr double nodeGapY = 10;            // Зазор между строками блоков
     static constexpr double framePadding = 12;        // Отступ блоков от края рамки файла
-    static constexpr double frameHeaderHeight = 72;   // Полоса имени файла над блоками
-    static constexpr double frameTitleSize = 40;      // Высота шрифта имени файла
     static constexpr double frameGap = 28;            // Зазор между рамками файлов
     static constexpr double folderPadding = 22;       // Отступ рамок от края области папки
-    static constexpr double folderHeaderHeight = 40;  // Полоса имени папки
-    static constexpr double noteTextSize = 15;        // Высота шрифта пометки
+    static constexpr int maxFolderDepth = 3;          // Папки глубже не рисуются областями: их файлы - в области папки этого уровня
+    static double nodeTextSize() {return settings().nodeTextSize;}               // Высота шрифта имени в блоке
+    static double nodeHeight() {return std::max(30.0, nodeTextSize() * 2.3);}    // Высота блока
+    static double nodeCharWidth() {return nodeTextSize() * 0.6;}                 // Ширина знака имени (моноширинный шрифт, 0.6 высоты)
+    static double frameTitleSize() {return settings().fileTitleSize;}            // Высота шрифта имени файла
+    static double frameHeaderHeight() {return frameTitleSize() * 1.8;}           // Полоса имени файла над блоками
+    static double folderTitleSize() {return settings().folderTitleSize;}         // Высота шрифта имени папки верхнего уровня
+    static double folderHeaderHeight() {return folderTitleSize() * 1.8;}         // Полоса имени папки
+    static double noteTextSize() {return settings().noteTextSize;}               // Высота шрифта пометки
 
     std::map<std::string, glm::dvec2> nodePositions; // Левый верхний угол блока по id узла
     std::vector<LayoutNote> notes;
@@ -80,6 +83,11 @@ public:
     // Полная раскладка: папки областями, файлы рамками, блоки сеткой по строкам файла
     void relayout(const Graph &graph);
 
+    // Раздвинуть наложения с зазором: блоки в рамке файла, рамки файлов и области подпапок в своей папке, от глубоких папок к корню.
+    // Закреплённые узлы (перетаскиваемые) стоят, их блок, рамка и папки отталкивают соседей в ближнюю сторону; остальное
+    // сдвигается вправо или вниз по порядку сверху вниз, слева направо. Возвращает число сдвинутых блоков, рамок и областей
+    int separate(const Graph &graph, const std::set<std::string> &pinnedIds = {});
+
     // Узлы по файлам: путь файла от корня проекта - индексы узлов
     static std::map<std::wstring, std::vector<int>> nodesByFile(const Graph &graph);
 
@@ -87,6 +95,16 @@ public:
     static double frameTitleWidth(const std::wstring &file);
 
 private:
+    // Блок, рамка или область при раздвигании: место, закреплено ли, узлы под ним, итоговый сдвиг
+    struct SeparationItem {
+        LayoutRect rect;
+        bool isPinned = false;
+        std::vector<int> nodes;
+        glm::dvec2 shift{0, 0};
+    };
+    // Раздвинуть набор соседей с зазором gap (по x и y): закреплённые ставятся первыми, остальные по порядку чтения
+    static int separateItems(std::vector<SeparationItem> &items, glm::dvec2 gap);
+
     // Раскладка блоков файла сеткой от левого верхнего угла рамки: типы сверху, дальше по строкам определения
     void placeFileGrid(const Graph &graph, std::vector<int> nodes, glm::dvec2 frameTopLeft);
     // Размер рамки файла с сеткой из всех его блоков
