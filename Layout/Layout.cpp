@@ -1,27 +1,26 @@
 #include "Layout.h"
 
 
-// Клеток сетки по высоте у блока узла: у функции - по числу строк (как задано в настройках), у остальных - одна
-int Layout::nodeRows(const GraphNode &node) {
-    // Логарифм - не больше 6 клеток, по строкам - не больше 40
-    constexpr int maxLogRows = 6;
-    constexpr int maxLinearRows = 40;
+// Во сколько раз блок узла больше обычного (вместе с именем): у функции - по числу строк, как задано в настройках, у остальных - 1
+double Layout::nodeScale(const GraphNode &node) {
+    // Логарифм - не больше 3.5 раза, по строкам - не больше 6
+    constexpr double maxLogScale = 3.5;
+    constexpr double maxLinearScale = 6;
     if (node.kind != NodeKind::Function || node.lineCount <= 0 || settings().nodeSizeMode == 0)
         return 1;
     double lines = double(node.lineCount);
     double step = settings().linesPerStep;
     if (settings().nodeSizeMode == 2)
-        return std::clamp(int(std::ceil(lines / step)), 1, maxLinearRows);
+        return std::clamp(std::sqrt(lines / step), 1.0, maxLinearScale);
     if (lines < step)
         return 1;
-    return std::min(2 + int(std::floor(std::log(lines / step) / std::log(3.0) + 1e-9)), maxLogRows);
+    return std::min(1.5 + 0.5 * std::floor(std::log(lines / step) / std::log(3.0) + 1e-9), maxLogScale);
 }
 
-// Размер блока узла: в несколько клеток - вместе с зазорами между ними, так блоки остаются в сетке
+// Размер блока узла
 glm::dvec2 Layout::nodeSize(const GraphNode &node) {
     double width = double(node.name.size()) * nodeCharWidth() + nodeTextSize() * 2.3;
-    int rows = nodeRows(node);
-    return glm::dvec2(std::clamp(width, nodeTextSize() * 8.5, nodeTextSize() * 26), rows * nodeHeight() + (rows - 1) * nodeGapY);
+    return glm::dvec2(std::clamp(width, nodeTextSize() * 8.5, nodeTextSize() * 26), nodeHeight()) * nodeScale(node);
 }
 
 // Размер пометки
@@ -127,10 +126,9 @@ double Layout::frameTitleWidth(const std::wstring &file) {
 }
 
 
-// Сетка файла: места блоков от левого верхнего угла рамки и размер рамки. Блоки идут по столбцам сверху вниз, столбец
-// заполняется до средней высоты (высокие блоки занимают несколько клеток); столбцов - около корня из трети клеток
+// Сетка файла: места блоков от левого верхнего угла рамки и размер рамки. Блоки разного размера идут полками слева направо
+// (типы сверху, дальше по строкам определения), ширина полки - под рамку примерно вдвое шире высоты
 std::vector<std::pair<int, glm::dvec2>> Layout::fileGrid(const Graph &graph, std::vector<int> nodes, glm::dvec2 &frameSize) {
-    // Типы сверху, дальше по строкам определения: соседние по файлу функции рядом
     std::sort(nodes.begin(), nodes.end(), [&](int first, int second) {
         bool isFirstType = graph.nodes[first].kind != NodeKind::Function;
         bool isSecondType = graph.nodes[second].kind != NodeKind::Function;
@@ -138,35 +136,35 @@ std::vector<std::pair<int, glm::dvec2>> Layout::fileGrid(const Graph &graph, std
             return isFirstType;
         return graph.nodes[first].line < graph.nodes[second].line;
     });
-    double columnWidth = 0;
-    int cellsCount = 0;
+    double area = 0;
+    double widest = 0;
     for (int nodeIndex : nodes) {
-        columnWidth = std::max(columnWidth, nodeSize(graph.nodes[nodeIndex]).x);
-        cellsCount += nodeRows(graph.nodes[nodeIndex]);
+        glm::dvec2 size = nodeSize(graph.nodes[nodeIndex]);
+        area += (size.x + nodeGapX) * (size.y + nodeGapY);
+        widest = std::max(widest, size.x);
     }
-    int columns = std::max(1, int(std::ceil(std::sqrt(cellsCount / 3.0))));
-    int columnCells = (cellsCount + columns - 1) / columns;
+    double shelfWidth = std::max(widest, std::sqrt(area * 2));
 
     std::vector<std::pair<int, glm::dvec2>> places;
-    int column = 0;
-    int row = 0;
-    int usedColumns = 0;
-    int usedRows = 0;
+    glm::dvec2 cursor(0, 0);
+    double rowHeight = 0;
+    double contentWidth = 0;
     for (int nodeIndex : nodes) {
-        int rows = nodeRows(graph.nodes[nodeIndex]);
-        if (row > 0 && row + rows > columnCells && column + 1 < columns) {
-            ++column;
-            row = 0;
+        glm::dvec2 size = nodeSize(graph.nodes[nodeIndex]);
+        if (cursor.x > 0 && cursor.x + size.x > shelfWidth) {
+            cursor.x = 0;
+            cursor.y += rowHeight + nodeGapY;
+            rowHeight = 0;
         }
-        places.push_back({nodeIndex, glm::dvec2(framePadding + column * (columnWidth + nodeGapX), frameHeaderHeight() + framePadding + row * (nodeHeight() + nodeGapY))});
-        row += rows;
-        usedColumns = column + 1;
-        usedRows = std::max(usedRows, row);
+        places.push_back({nodeIndex, glm::dvec2(framePadding, frameHeaderHeight() + framePadding) + cursor});
+        cursor.x += size.x + nodeGapX;
+        rowHeight = std::max(rowHeight, size.y);
+        contentWidth = std::max(contentWidth, cursor.x - nodeGapX);
     }
-    frameSize.x = usedColumns * columnWidth + std::max(0, usedColumns - 1) * nodeGapX + 2 * framePadding;
+    frameSize.x = contentWidth + 2 * framePadding;
     if (!nodes.empty())
         frameSize.x = std::max(frameSize.x, frameTitleWidth(graph.nodes[nodes.front()].file));
-    frameSize.y = usedRows * nodeHeight() + std::max(0, usedRows - 1) * nodeGapY + 2 * framePadding + frameHeaderHeight();
+    frameSize.y = cursor.y + rowHeight + 2 * framePadding + frameHeaderHeight();
     return places;
 }
 

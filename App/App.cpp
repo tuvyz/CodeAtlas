@@ -416,10 +416,11 @@ void App::createSettingsWindow() {
     addRow(L"Толщина связей", L"Толщина линий связей, пиксели экрана (у выбранного блока - в 1.6 раза толще)",
            0.5, 5, 0.1, []() {return settings().edgeThickness;}, [](double value) {settings().edgeThickness = value;}, tenths);
     addRow(L"Шаг колеса, %", L"На сколько процентов меняется масштаб за щелчок колеса", 5, 60, 1, []() {return settings().wheelZoomStep;}, [](double value) {settings().wheelZoomStep = value;}, whole);
-    addRow(L"Высота функции", L"Высота блока функции: одна клетка у всех, ступенями по логарифму числа строк или по числу строк",
+    addRow(L"Размер функции", L"Размер блока функции вместе с именем: один у всех, ступенями по логарифму числа строк или площадь по числу строк",
            0, 2, 1, []() {return double(settings().nodeSizeMode);}, [](double value) {settings().nodeSizeMode = int(std::lround(value));},
-           [](double value) {int mode = int(std::lround(value)); return std::wstring(mode == 0 ? L"одна" : mode == 1 ? L"логарифм" : L"строки");}, true);
-    addRow(L"Строк на ступень", L"Логарифм: с этого числа строк блок в две клетки, каждая следующая клетка - втрое больше строк. По строкам: строк на клетку",
+           [](double value) {int mode = int(std::lround(value)); return std::wstring(mode == 0 ? L"один" : mode == 1 ? L"логарифм" : L"строки");}, true);
+    addRow(L"Строк на ступень", L"Логарифм: с этого числа строк блок в 1.5 раза больше, каждая следующая ступень (+0.5) - втрое больше строк. "
+                                L"По строкам: столько строк у блока обычного размера, площадь растёт с числом строк",
            5, 200, 5, []() {return settings().linesPerStep;}, [](double value) {settings().linesPerStep = value;}, whole, true);
 
     y += 8;

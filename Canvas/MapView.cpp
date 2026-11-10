@@ -383,34 +383,39 @@ void MapView::buildScene() {
             borderWidth = 2.4f;
         }
 
+        // Крупный блок (по числу строк) - обычный блок в масштабе: скругление, полоска, отступы и имя растут вместе с ним
+        float scale = float(Layout::nodeScale(node));
         fill.a *= alpha;
         border.a *= alpha;
         text.a *= alpha;
-        nodeLayer.shapes.push_back(boxShape(rect, shapeKind, corner, fill, border, borderWidth));
+        nodeLayer.shapes.push_back(boxShape(rect, shapeKind, corner * scale, fill, border, borderWidth));
 
         // Полоска цвета файла у функции
         float textLeft = 12;
         if (node.kind == NodeKind::Function) {
             glm::vec4 accent = fileColor(node.file);
             accent.a *= alpha;
-            LayoutRect stripe{rect.position + glm::dvec2(4, 6), glm::dvec2(3, rect.size.y - 12)};
-            nodeLayer.shapes.push_back(boxShape(stripe, ShapeKind::RoundBox, 1.5f, accent, glm::vec4(0), 0));
+            LayoutRect stripe{rect.position + glm::dvec2(4, 6) * double(scale), glm::dvec2(3 * scale, rect.size.y - 12 * scale)};
+            nodeLayer.shapes.push_back(boxShape(stripe, ShapeKind::RoundBox, 1.5f * scale, accent, glm::vec4(0), 0));
             textLeft = 14;
         } else if (shapeKind == ShapeKind::Parallelogram) {
             textLeft = 15;
         }
-        // Имя - в верхней клетке; у блока в несколько клеток под именем число строк
-        float topMiddle = float(Layout::nodeHeight()) * 0.5f;
-        font.addText(nodeLayer, node.name, glm::vec2(rect.position) + glm::vec2(textLeft, topMiddle), float(Layout::nodeTextSize()),
-                     text, glm::vec2(0, 0), float(rect.size.x) - textLeft - 8);
-        if (Layout::nodeRows(node) > 1) {
+        textLeft *= scale;
+
+        // Имя посередине; у крупного блока - выше середины, под ним мелко число строк
+        float textSize = float(Layout::nodeTextSize()) * scale;
+        float nameMiddle = float(rect.size.y) * (scale > 1 ? 0.4f : 0.5f);
+        font.addText(nodeLayer, node.name, glm::vec2(rect.position) + glm::vec2(textLeft, nameMiddle), textSize, text, glm::vec2(0, 0),
+                     float(rect.size.x) - textLeft - 8 * scale);
+        if (scale > 1) {
             int lastDigit = node.lineCount % 10;
             int lastTwoDigits = node.lineCount % 100;
             std::wstring linesWord = lastDigit == 1 && lastTwoDigits != 11 ? L" строка" :
                                      lastDigit >= 2 && lastDigit <= 4 && (lastTwoDigits < 12 || lastTwoDigits > 14) ? L" строки" : L" строк";
             glm::vec4 linesColor = glm::mix(text, glm::vec4(fill.r, fill.g, fill.b, text.a), 0.45f);
-            font.addText(nodeLayer, std::to_wstring(node.lineCount) + linesWord, glm::vec2(rect.position) + glm::vec2(textLeft, topMiddle * 2.6f),
-                         float(Layout::nodeTextSize()) * 0.85f, linesColor);
+            font.addText(nodeLayer, std::to_wstring(node.lineCount) + linesWord, glm::vec2(rect.position) + glm::vec2(textLeft, float(rect.size.y) * 0.75f),
+                         textSize * 0.55f, linesColor);
         }
     }
 
@@ -423,8 +428,9 @@ void MapView::buildScene() {
                 continue;
             LayoutRect rect{found->second, Layout::nodeSize(node)};
             nodeLayer.shapes.push_back(boxShape(rect, ShapeKind::DashedBox, 6, hexColor(0xF4F2ED, 0.6f), hexColor(0xB04848), 1.4f));
-            font.addText(nodeLayer, node.name, glm::vec2(rect.position) + glm::vec2(12, float(Layout::nodeHeight()) * 0.5f), float(Layout::nodeTextSize()),
-                         hexColor(0xA05A5A), glm::vec2(0, 0), float(rect.size.x) - 20);
+            float scale = float(Layout::nodeScale(node));
+            font.addText(nodeLayer, node.name, glm::vec2(rect.position) + glm::vec2(12 * scale, float(rect.size.y) * 0.5f), float(Layout::nodeTextSize()) * scale,
+                         hexColor(0xA05A5A), glm::vec2(0, 0), float(rect.size.x) - 20 * scale);
         }
     }
 
