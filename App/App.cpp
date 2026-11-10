@@ -407,6 +407,30 @@ void App::createSettingsWindow() {
         });
         y += 38;
     };
+    // Строка выбора из списка: подпись, раскрывающийся список (номер выбранного - значение настройки)
+    auto addChoice = [&](const std::wstring &title, const std::wstring &toolTip, const std::vector<std::wstring> &choices, std::function<int()> get,
+                         std::function<void(int)> set, bool isLayoutSize) {
+        auto *label = new vgui::Label(vgui::MySize<double>(sliderLeft - left - 8, 30), glm::dvec2(left, y), fixedSize, inParent, glm::dvec2(0, 0), title);
+        label->setFontSize(14);
+        label->setToolTip(toolTip);
+        settingsWindow->addChild(label);
+        auto *combo = new vgui::ComboBox(vgui::MySize<double>(windowWidth - sliderLeft - left, 30), glm::dvec2(sliderLeft, y), vgui::FIXED_SIZE, inParent,
+                                         glm::dvec2(0, 0));
+        combo->setFontSize(14);
+        for (const std::wstring &choice : choices)
+            combo->addItem(choice);
+        combo->setActiveItemId(get());
+        settingsWindow->addChild(combo);
+        settingsRowUpdaters.push_back([combo, get]() {combo->setActiveItemId(get());});
+        combo->eventManager().subscribe<vgui::ComboBox::ChangeItem_Event>(this, [this, set, isLayoutSize](const vgui::ComboBox::ChangeItem_Event &event) {
+            set(event.comboBoxItem.id);
+            isSettingsChanged = true;
+            if (isLayoutSize)
+                separateAfterSizeChange();
+            mapView.invalidate();
+        });
+        y += 38;
+    };
     auto whole = [](double value) {return std::to_wstring(int(std::lround(value)));};
     auto tenths = [](double value) {
         int tenthsCount = int(std::lround(value * 10));
@@ -424,9 +448,8 @@ void App::createSettingsWindow() {
     addRow(L"Толщина связей", L"Толщина линий связей, пиксели экрана (у выбранного блока - в 1.6 раза толще)",
            0.5, 5, 0.1, []() {return settings().edgeThickness;}, [](double value) {settings().edgeThickness = value;}, tenths);
     addRow(L"Шаг колеса, %", L"На сколько процентов меняется масштаб за щелчок колеса", 5, 60, 1, []() {return settings().wheelZoomStep;}, [](double value) {settings().wheelZoomStep = value;}, whole);
-    addRow(L"Размер функции", L"Размер блока функции вместе с именем: один у всех, ступенями по логарифму числа строк или площадь по числу строк",
-           0, 2, 1, []() {return double(settings().nodeSizeMode);}, [](double value) {settings().nodeSizeMode = int(std::lround(value));},
-           [](double value) {int mode = int(std::lround(value)); return std::wstring(mode == 0 ? L"один" : mode == 1 ? L"логарифм" : L"строки");}, true);
+    addChoice(L"Размер функции", L"Размер блока функции вместе с именем: один у всех, ступенями по логарифму числа строк или площадь по числу строк",
+              {L"один у всех", L"логарифм строк", L"по строкам"}, []() {return settings().nodeSizeMode;}, [](int value) {settings().nodeSizeMode = value;}, true);
     addRow(L"Строк на ступень", L"Логарифм: с этого числа строк блок в 1.5 раза больше, каждая следующая ступень (+0.5) - втрое больше строк. "
                                 L"По строкам: столько строк у блока обычного размера, площадь растёт с числом строк",
            5, 200, 5, []() {return settings().linesPerStep;}, [](double value) {settings().linesPerStep = value;}, whole, true);
@@ -441,10 +464,9 @@ void App::createSettingsWindow() {
     // IDE для «Открыть в IDE»: Qt Creator, Visual Studio или своя команда
     y += 8;
     addSection(L"IDE");
-    addRow(L"Открывать в", L"Qt Creator и Visual Studio находятся сами: файл открывается в той, где уже открыт этот проект, нет такой - "
-                           L"запускается новая с проектом. Своя команда - строкой ниже",
-           0, 2, 1, []() {return double(settings().ideKind);}, [](double value) {settings().ideKind = int(std::lround(value));},
-           [](double value) {int kind = int(std::lround(value)); return std::wstring(kind == 0 ? L"Qt" : kind == 1 ? L"VS" : L"своя");});
+    addChoice(L"Открывать в", L"Qt Creator и Visual Studio находятся сами: файл открывается в той, где уже открыт этот проект, нет такой - "
+                              L"запускается новая с проектом. Своя команда - строкой ниже",
+              {L"Qt Creator", L"Visual Studio", L"своя команда"}, []() {return settings().ideKind;}, [](int value) {settings().ideKind = value;}, false);
     {
         auto *ideEdit = new vgui::LineEdit(vgui::MySize<double>(windowWidth - 2 * left, 32), glm::dvec2(left, y), fixedSize, inParent, glm::dvec2(0, 0),
                                            settings().ideCommand);
