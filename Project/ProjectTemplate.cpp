@@ -73,16 +73,33 @@ bool ProjectTemplate::load(const std::wstring &projectRoot) {
 // Путь файла от корня проекта через /, пустой - файл вне проекта или в исключённой папке
 std::wstring ProjectTemplate::projectRelativePath(const std::wstring &absolutePath) const {
     std::wstring normalized = std::filesystem::path(absolutePath).lexically_normal().generic_wstring();
-    if (normalized.size() <= root.size() + 1 || normalized.compare(0, root.size(), root) != 0 || normalized[root.size()] != L'/')
+
+    // Под Windows регистр в путях не важен (clang отдаёт и e:/, и E:/), сравнение - в нижнем регистре
+    auto comparable = [](const std::wstring &text) {
+#ifdef _WIN32
+        std::wstring result = text;
+        for (wchar_t &character : result)
+            character = wchar_t(std::towlower(character));
+        return result;
+#else
+        return text;
+#endif
+    };
+    std::wstring normalizedKey = comparable(normalized);
+    std::wstring rootKey = comparable(root);
+    if (normalizedKey.size() <= rootKey.size() + 1 || normalizedKey.compare(0, rootKey.size(), rootKey) != 0 || normalizedKey[rootKey.size()] != L'/')
         return std::wstring();
     std::wstring relative = normalized.substr(root.size() + 1);
+    std::wstring relativeKey = normalizedKey.substr(rootKey.size() + 1);
     for (const std::wstring &excluded : exclude) {
-        if (relative.compare(0, excluded.size(), excluded) == 0 && (relative.size() == excluded.size() || relative[excluded.size()] == L'/'))
+        std::wstring excludedKey = comparable(excluded);
+        if (relativeKey.compare(0, excludedKey.size(), excludedKey) == 0 &&
+            (relativeKey.size() == excludedKey.size() || relativeKey[excludedKey.size()] == L'/'))
             return std::wstring();
     }
     // Папка сборки на карту тоже не попадает
-    if (relative.compare(0, compileCommandsDir.size(), compileCommandsDir) == 0 && relative.size() > compileCommandsDir.size() &&
-        relative[compileCommandsDir.size()] == L'/')
+    std::wstring buildKey = comparable(compileCommandsDir);
+    if (relativeKey.compare(0, buildKey.size(), buildKey) == 0 && relativeKey.size() > buildKey.size() && relativeKey[buildKey.size()] == L'/')
         return std::wstring();
     return relative;
 }

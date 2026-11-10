@@ -1,4 +1,8 @@
 #include "Analyzer.h"
+// windows.h - только здесь (приоритет потоков разбора): из заголовка он раздал бы свои макросы
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 
 namespace {
@@ -672,19 +676,30 @@ bool Analyzer::scan(const ProjectTemplate &project, Graph &graph, std::wstring &
     }
     unitsTotal = int(units.size());
     Debug() << "Сканирование:" << units.size() << "единиц, compile_commands -" << compileDir.string() << ", resource-dir:" << resourceDir;
+    if (!units.empty()) {
+        std::string arguments;
+        for (const std::string &argument : units[0].arguments)
+            arguments += argument + " ";
+        Debug() << "Флаги первой единицы:" << units[0].file << arguments;
+    }
 
     // Разбор в потоках: каждый со своим CXIndex, результаты сливаются после
     SharedScan shared;
     shared.project = &project;
     shared.componentCalls = std::set<std::string>(project.componentCalls.begin(), project.componentCalls.end());
     shared.writeCalls = std::set<std::string>(project.writeCalls.begin(), project.writeCalls.end());
-    int threadsCount = std::max(1, int(std::thread::hardware_concurrency()));
+    // Потоков - половина ядер, не больше 8: единица с тяжёлыми заголовками держит в libclang сотни мегабайт, и окну нужен свой проц
+    constexpr int maxThreads = 8;
+    int threadsCount = std::clamp(int(std::thread::hardware_concurrency()) / 2, 1, maxThreads);
     threadsCount = std::min(threadsCount, int(units.size()));
     std::vector<WorkerResult> results(threadsCount);
     std::atomic<int> nextUnit = 0;
     std::vector<std::thread> threads;
     for (int threadIndex = 0; threadIndex < threadsCount; ++threadIndex) {
         threads.emplace_back([&, threadIndex]() {
+#ifdef _WIN32
+            SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+#endif
             UnitParser parser(shared, results[threadIndex]);
             while (!isStopRequested) {
                 int unitIndex = nextUnit++;

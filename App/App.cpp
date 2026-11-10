@@ -343,6 +343,7 @@ void App::openProject(const std::wstring &root) {
     }
     saveLayout();
 
+    Debug() << "CodeAtlas: открытие проекта" << wstringToString(root);
     bool hasTemplate = project.load(root);
     layout.load((std::filesystem::path(project.root) / ".codeatlas" / "layout.txt").wstring());
     bool hasSavedCamera = layout.hasCamera;
@@ -377,6 +378,7 @@ void App::openProject(const std::wstring &root) {
     historyBar->setVisible(!history.snapshots.empty());
     mapView.invalidate();
     isDetailsDirty = true;
+    Debug() << "CodeAtlas: проект открыт, снимков" << history.snapshots.size() << ", узлов на карте" << shownGraph.nodes.size();
 }
 
 
@@ -761,8 +763,16 @@ void App::handleCanvasKey(const SDL_KeyboardEvent &key) {
 
 // Запуск окна с проектом (пусто - последний открытый)
 int App::run(const std::wstring &projectRoot) {
+#ifdef _WIN32
+    // У оконной программы Windows нет консоли: лог - в файл рядом с файлом последнего проекта (%APPDATA%/tuvyz/CodeAtlas/codeatlas.log)
+    std::filesystem::path logPath = recentProjectFile().parent_path() / "codeatlas.log";
+    if (_wfreopen(logPath.c_str(), L"w", stderr) != nullptr)
+        setvbuf(stderr, nullptr, _IONBF, 0);
+#endif
+    Debug() << "CodeAtlas: запуск";
     if (!initWindow())
         return 1;
+    Debug() << "CodeAtlas: окно" << windowSize.x << "x" << windowSize.y << ", OpenGL" << reinterpret_cast<const char*>(glGetString(GL_VERSION));
     createGui();
     mapView.layout = &layout;
     mapView.setViewport(windowSize);
@@ -780,6 +790,8 @@ int App::run(const std::wstring &projectRoot) {
         statusLabel->setText(L"Указать папку проекта и «Открыть»");
     if (isDetailsDirty)
         rebuildDetails();
+    Debug() << "CodeAtlas: интерфейс готов";
+    bool isFirstFrame = true;
 
     Uint64 previousTicks = SDL_GetPerformanceCounter();
     while (isRunning) {
@@ -853,6 +865,10 @@ int App::run(const std::wstring &projectRoot) {
         mapView.render(windowSize);
         gui->render();
         SDL_GL_SwapWindow(window);
+        if (isFirstFrame) {
+            Debug() << "CodeAtlas: первый кадр";
+            isFirstFrame = false;
+        }
     }
 
     if (isScanning) {

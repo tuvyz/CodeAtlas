@@ -5,6 +5,7 @@
 #include <vector>
 #include <fstream>
 #include <filesystem>
+#include <cwctype>
 #include "Global/Strings.h"
 
 
