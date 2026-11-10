@@ -1,0 +1,30 @@
+#pragma once
+
+// Вся библиотека одним заголовком
+#include <VisorGUI/guiengine.h>
+#include <VisorGUI/Widgets/abstractwidget.h>
+#include <VisorGUI/Widgets/button.h>
+#include <VisorGUI/Widgets/chart.h>
+#include <VisorGUI/Widgets/checkbox.h>
+#include <VisorGUI/Widgets/colorpicker.h>
+#include <VisorGUI/Widgets/colorswatch.h>
+#include <VisorGUI/Widgets/combobox.h>
+#include <VisorGUI/Widgets/console.h>
+#include <VisorGUI/Widgets/folderbrowser.h>
+#include <VisorGUI/Widgets/framebox.h>
+#include <VisorGUI/Widgets/label.h>
+#include <VisorGUI/Widgets/lineedit.h>
+#include <VisorGUI/Widgets/menubar.h>
+#include <VisorGUI/Widgets/popupmenu.h>
+#include <VisorGUI/Widgets/progressbar.h>
+#include <VisorGUI/Widgets/scrollareawidget.h>
+#include <VisorGUI/Widgets/slider.h>
+#include <VisorGUI/Widgets/spoiler.h>
+#include <VisorGUI/Widgets/switchbutton.h>
+#include <VisorGUI/Widgets/tooltip.h>
+#include <VisorGUI/Widgets/valueedit.h>
+#include <VisorGUI/Widgets/vec2lineedit.h>
+#include <VisorGUI/Widgets/vec3lineedit.h>
+#include <VisorGUI/Widgets/verticallayout.h>
+#include <VisorGUI/Tools/filedialog.h>
+#include <VisorGUI/Tools/textvalidator.h>

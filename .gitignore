@@ -1,5 +1,6 @@
-build/
+build*/
 out/
 .vs/
+.codeatlas/
 *.user
 CMakeLists.txt.user*
