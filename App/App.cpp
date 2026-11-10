@@ -1706,11 +1706,11 @@ void App::rebuildDetails() {
     if (shownGraph.nodes.empty()) {
         addLabel(L"Карты ещё нет", 18, inkColor);
         y += 8;
-        addParagraph(L"1. В CMakeLists.txt проекта: set(CMAKE_EXPORT_COMPILE_COMMANDS ON) и собрать (Ninja или Makefile) - появится "
-                     L"compile_commands.json в папке сборки.\n2. Открыть проект - CodeAtlas разберёт его сам. Папку сборки он ищет сам; "
-                     L"не нашёл - указать её compile_commands.json кнопкой «Открыть».\n3. По желанию в корне проекта codeatlas.yaml: исключения, "
-                     L"вызовы компонентов (docs/PROJECT_TEMPLATE.md).\n\nРаскладка и разбор хранятся у CodeAtlas (Projects рядом с программой), "
-                     L"в проект ничего не пишется.", 14, inkColor);
+        addParagraph(L"Проект разбирается сам: все исходники C/C++ его папки, заголовки ищутся от корня и по папкам проекта. Если у проекта есть "
+                     L"compile_commands.json (CMake с CMAKE_EXPORT_COMPILE_COMMANDS), берутся точные флаги сборки из него; лежит не рядом "
+                     L"с проектом - указать кнопкой «Открыть».\n\nПо желанию в корне проекта codeatlas.yaml: исключения, вызовы компонентов "
+                     L"(docs/PROJECT_TEMPLATE.md).\n\nРаскладка и разбор хранятся у CodeAtlas (Projects рядом с программой), в проект ничего не пишется.",
+                     14, inkColor);
         return;
     }
 

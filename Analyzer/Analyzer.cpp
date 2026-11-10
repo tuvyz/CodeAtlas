@@ -907,13 +907,67 @@ int64_t fileWriteTime(const std::filesystem::path &path) {
     return errorCode ? 0 : int64_t(time.time_since_epoch().count());
 }
 
-// Единицы проекта из compile_commands.json с флагами для libclang; error - причина, если не вышло
+// Единицы проекта с флагами для libclang: из compile_commands.json, а нет его - все исходники папки проекта (заголовки ищутся от корня
+// и по всем папкам проекта, C++20: флагов сборки нет - макросы по умолчанию). error - причина, если не вышло
 bool loadUnits(const ProjectTemplate &project, std::vector<Unit> &units, std::filesystem::path &compileCommandsPath, std::wstring &error) {
     std::filesystem::path compileDir = Analyzer::findCompileCommandsDir(project);
     if (compileDir.empty()) {
-        error = L"Не найден compile_commands.json: открыть проект в Qt Creator (он пишет его в папку сборки, в .qtc_clangd) или "
-                L"в CMakeLists.txt set(CMAKE_EXPORT_COMPILE_COMMANDS ON); лежит не рядом с проектом - указать кнопкой «Открыть»";
-        return false;
+        units.clear();
+        compileCommandsPath.clear();
+        std::filesystem::path root(project.root);
+        std::string resourceDir = Analyzer::findClangResourceDir();
+        static const std::set<std::string> sourceExtensions = {".c", ".cc", ".cpp", ".cxx", ".c++"};
+
+        // Папки проекта (без скрытых и папок сборки) - для поиска заголовков, мельче - раньше; исходники вне исключённых - единицы
+        std::vector<std::filesystem::path> folders{root};
+        std::vector<std::filesystem::path> sources;
+        std::error_code errorCode;
+        for (auto entry = std::filesystem::recursive_directory_iterator(root, std::filesystem::directory_options::skip_permission_denied, errorCode);
+             entry != std::filesystem::recursive_directory_iterator(); entry.increment(errorCode)) {
+            if (errorCode)
+                break;
+            std::filesystem::path path = entry->path();
+            if (entry->is_directory(errorCode)) {
+                if (path.filename().string().rfind('.', 0) == 0 || std::filesystem::exists(path / "CMakeCache.txt", errorCode))
+                    entry.disable_recursion_pending();
+                else
+                    folders.push_back(path);
+                continue;
+            }
+            std::string extension = path.extension().string();
+            std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
+            if (sourceExtensions.count(extension) > 0 && !project.projectRelativePath(path.wstring()).empty())
+                sources.push_back(path);
+        }
+        std::stable_sort(folders.begin(), folders.end(), [](const std::filesystem::path &first, const std::filesystem::path &second) {
+            return std::distance(first.begin(), first.end()) < std::distance(second.begin(), second.end());
+        });
+
+        for (const std::filesystem::path &source : sources) {
+            Unit unit;
+            unit.file = source.lexically_normal().string();
+            unit.relativeFile = project.projectRelativePath(source.wstring());
+            bool isC = source.extension() == ".c";
+            unit.arguments = {"-x", isC ? "c" : "c++", isC ? "-std=c11" : "-std=c++20"};
+            for (const std::filesystem::path &folder : folders) {
+                unit.arguments.push_back("-I");
+                unit.arguments.push_back(folder.lexically_normal().string());
+            }
+            if (!resourceDir.empty()) {
+                unit.arguments.push_back("-resource-dir");
+                unit.arguments.push_back(resourceDir);
+            }
+            unit.arguments.push_back("-Xclang");
+            unit.arguments.push_back("-fparse-all-comments");
+            unit.arguments.push_back("-Wno-everything");
+            units.push_back(unit);
+        }
+        if (units.empty()) {
+            error = L"В папке проекта нет исходников C/C++";
+            return false;
+        }
+        Debug() << "Без compile_commands.json:" << units.size() << "исходников, папок для заголовков" << folders.size();
+        return true;
     }
     compileCommandsPath = compileDir / "compile_commands.json";
     CXCompilationDatabase_Error databaseError;
@@ -1156,16 +1210,14 @@ std::filesystem::path Analyzer::findCompileCommandsDir(const ProjectTemplate &pr
             return folder;
     }
 
-    // Иначе самый свежий: в папках проекта до трёх уровней (кроме скрытых) и в соседних папках сборки Qt Creator вида build-<проект>-<комплект>.
-    // Из скрытых - .qtc_clangd: туда Qt Creator сам пишет compile_commands.json для своей модели кода (у любого открытого в нём проекта, и qmake тоже)
+    // Иначе самый свежий: в папках проекта до трёх уровней (кроме скрытых) и в соседних папках сборки вида build-<проект>-...
     std::filesystem::path newest;
     std::filesystem::file_time_type newestTime;
     auto searchIn = [&](const std::filesystem::path &start) {
         std::error_code searchError;
         std::filesystem::recursive_directory_iterator iterator(start, std::filesystem::directory_options::skip_permission_denied, searchError);
         for (; !searchError && iterator != std::filesystem::recursive_directory_iterator(); iterator.increment(searchError)) {
-            std::wstring name = iterator->path().filename().wstring();
-            if (iterator.depth() >= 3 || (name.rfind(L'.', 0) == 0 && name != L".qtc_clangd")) {
+            if (iterator.depth() >= 3 || iterator->path().filename().wstring().rfind(L'.', 0) == 0) {
                 iterator.disable_recursion_pending();
                 continue;
             }
@@ -1223,7 +1275,8 @@ bool Analyzer::scan(const ProjectTemplate &project, ScanState &state, std::wstri
     std::filesystem::path compileCommandsPath;
     if (!loadUnits(project, units, compileCommandsPath, error))
         return false;
-    Debug() << "Сканирование:" << units.size() << "единиц, compile_commands -" << compileCommandsPath.string() << ", resource-dir:" << findClangResourceDir();
+    Debug() << "Сканирование:" << units.size() << "единиц, compile_commands -" << (compileCommandsPath.empty() ? std::string("нет") : compileCommandsPath.string())
+            << ", resource-dir:" << findClangResourceDir();
 
     // Шейдеры разбираются сразу: их имена нужны потокам, чтобы узнавать имена шейдеров строками в C++
     // Время правки единиц - до разбора: поправленная во время разбора при следующей проверке окажется правленой
@@ -1253,7 +1306,7 @@ bool Analyzer::scan(const ProjectTemplate &project, ScanState &state, std::wstri
     for (const auto &[shaderFile, shader] : shaders.files)
         state.fileTimes[shaderFile] = fileWriteTime(root / shaderFile);
     state.compileCommandsPath = compileCommandsPath.wstring();
-    state.compileCommandsTime = fileWriteTime(compileCommandsPath);
+    state.compileCommandsTime = compileCommandsPath.empty() ? 0 : fileWriteTime(compileCommandsPath);
     Debug() << "Сканирование: файлов с определениями" << state.files.size() << ", под слежением" << state.fileTimes.size()
             << ", единиц с ошибками разбора:" << int(unitsWithErrors);
     return true;
@@ -1390,7 +1443,7 @@ bool Analyzer::update(const ProjectTemplate &project, ScanState &state, const st
                 state.fileTimes[file] = time;
         }
         state.compileCommandsPath = compileCommandsPath.wstring();
-        state.compileCommandsTime = fileWriteTime(compileCommandsPath);
+        state.compileCommandsTime = compileCommandsPath.empty() ? 0 : fileWriteTime(compileCommandsPath);
     }
     Debug() << "Пересканирование:" << files.size() << "файлов," << units.size() << "единиц, заменено файлов" << replacedFiles.size()
             << (isDisk ? "" : "(другая версия)");
