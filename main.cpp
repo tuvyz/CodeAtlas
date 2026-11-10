@@ -3,6 +3,11 @@
 
 // Сканирование без окна: CodeAtlas --scan <корень проекта> [--out <файл графа>]; граф по умолчанию - graph.txt в папке данных проекта
 static int runScanCommand(const std::string &root, const std::string &outPath) {
+    std::error_code errorCode;
+    if (!std::filesystem::is_directory(std::filesystem::u8path(root), errorCode)) {
+        Debug() << "Нет папки проекта" << root;
+        return 1;
+    }
     ProjectTemplate project;
     if (!project.load(stringToWString(root)))
         Debug() << "Нет codeatlas.yaml в" << root << "- значения по умолчанию";
