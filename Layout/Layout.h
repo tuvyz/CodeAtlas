@@ -48,8 +48,8 @@ public:
     static constexpr double nodeGapX = 18;            // Зазор между столбцами блоков в рамке файла
     static constexpr double nodeGapY = 10;            // Зазор между строками блоков
     static constexpr double framePadding = 12;        // Отступ блоков от края рамки файла
-    static constexpr double frameHeaderHeight = 38;   // Полоса имени файла над блоками
-    static constexpr double frameTitleSize = 20;      // Высота шрифта имени файла
+    static constexpr double frameHeaderHeight = 72;   // Полоса имени файла над блоками
+    static constexpr double frameTitleSize = 40;      // Высота шрифта имени файла
     static constexpr double frameGap = 28;            // Зазор между рамками файлов
     static constexpr double folderPadding = 22;       // Отступ рамок от края области папки
     static constexpr double folderHeaderHeight = 40;  // Полоса имени папки

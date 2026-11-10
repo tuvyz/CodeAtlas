@@ -313,9 +313,9 @@ void MapView::buildScene() {
         LayoutRect headerBottom{header.position + glm::dvec2(0, header.size.y * 0.5), glm::dvec2(header.size.x, header.size.y * 0.5)};
         areaLayer.shapes.push_back(boxShape(headerBottom, ShapeKind::RoundBox, 0, headerFill, glm::vec4(0), 0));
 
-        // Имя файла целиком, без многоточий: вблизи - размером холста в полосе имени (рамка не уже имени), издали - 13 пикселей на экране
+        // Имя файла целиком, без многоточий: вблизи - размером холста в полосе имени (рамка не уже имени), издали - 26 пикселей на экране
         // в верху рамки, когда помещается в её ширину (с зазором до соседней рамки); не помещается - не пишется, пока не приблизить
-        constexpr float fileScreenSize = 13;
+        constexpr float fileScreenSize = 26;
         float titleSize = float(Layout::frameTitleSize);
         float switchZoom = fileScreenSize / titleSize;
         std::wstring name = lastPathPart(frame.file);
@@ -327,7 +327,7 @@ void MapView::buildScene() {
         float farLabelEndZoom = switchZoom * 0.75f * 0.75f;
         if (appearZoom < farLabelEndZoom)
             font.addText(overlayLayer, name, glm::vec2(frame.rect.position), fileScreenSize, titleColor, glm::vec2(appearZoom, farLabelEndZoom), 0, true,
-                         glm::vec2(6, fileScreenSize * 0.5f + 4));
+                         glm::vec2(8, fileScreenSize * 0.5f + 6));
     }
 
     // Связи: выбранного (без выбора - под курсором), все - по галке «Все связи»
