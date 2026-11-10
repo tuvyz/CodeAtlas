@@ -6,6 +6,7 @@
 #include <map>
 #include <set>
 #include <cmath>
+#include <cwctype>
 #include <algorithm>
 #include <SDL.h>
 #include <glm/glm.hpp>

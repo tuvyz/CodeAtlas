@@ -97,7 +97,16 @@ LayoutRect Layout::fileFrame(const Graph &graph, const std::vector<int> &fileNod
     LayoutRect rect;
     rect.position = minimum - glm::dvec2(framePadding, framePadding + frameHeaderHeight);
     rect.size = maximum - minimum + glm::dvec2(2 * framePadding, 2 * framePadding + frameHeaderHeight);
+    rect.size.x = std::max(rect.size.x, frameTitleWidth(graph.nodes[fileNodes.front()].file));
     return rect;
+}
+
+
+// Наименьшая ширина рамки файла: имя файла целиком (моноширинный шрифт, знак - 0.6 высоты)
+double Layout::frameTitleWidth(const std::wstring &file) {
+    size_t slash = file.rfind(L'/');
+    size_t nameLength = slash == std::wstring::npos ? file.size() : file.size() - slash - 1;
+    return double(nameLength) * frameTitleSize * 0.6 + 2 * framePadding + 6;
 }
 
 
@@ -113,8 +122,10 @@ glm::dvec2 Layout::fileGridFrameSize(const Graph &graph, const std::vector<int> 
         columnWidth = std::max(columnWidth, nodeSize(graph.nodes[nodeIndex]).x);
     int columns = fileGridColumns(int(nodes.size()));
     int rows = (int(nodes.size()) + columns - 1) / columns;
-    return glm::dvec2(columns * columnWidth + (columns - 1) * nodeGapX + 2 * framePadding,
-                      rows * nodeHeight + (rows - 1) * nodeGapY + 2 * framePadding + frameHeaderHeight);
+    double width = columns * columnWidth + (columns - 1) * nodeGapX + 2 * framePadding;
+    if (!nodes.empty())
+        width = std::max(width, frameTitleWidth(graph.nodes[nodes.front()].file));
+    return glm::dvec2(width, rows * nodeHeight + (rows - 1) * nodeGapY + 2 * framePadding + frameHeaderHeight);
 }
 
 // Раскладка блоков файла сеткой от левого верхнего угла рамки: типы сверху, дальше по строкам определения

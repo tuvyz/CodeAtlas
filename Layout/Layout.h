@@ -48,7 +48,8 @@ public:
     static constexpr double nodeGapX = 18;            // Зазор между столбцами блоков в рамке файла
     static constexpr double nodeGapY = 10;            // Зазор между строками блоков
     static constexpr double framePadding = 12;        // Отступ блоков от края рамки файла
-    static constexpr double frameHeaderHeight = 24;   // Полоса имени файла над блоками
+    static constexpr double frameHeaderHeight = 38;   // Полоса имени файла над блоками
+    static constexpr double frameTitleSize = 20;      // Высота шрифта имени файла
     static constexpr double frameGap = 28;            // Зазор между рамками файлов
     static constexpr double folderPadding = 22;       // Отступ рамок от края области папки
     static constexpr double folderHeaderHeight = 40;  // Полоса имени папки
@@ -81,6 +82,9 @@ public:
 
     // Узлы по файлам: путь файла от корня проекта - индексы узлов
     static std::map<std::wstring, std::vector<int>> nodesByFile(const Graph &graph);
+
+    // Наименьшая ширина рамки файла: имя файла целиком (моноширинный шрифт, знак - 0.6 высоты)
+    static double frameTitleWidth(const std::wstring &file);
 
 private:
     // Раскладка блоков файла сеткой от левого верхнего угла рамки: типы сверху, дальше по строкам определения

@@ -18,6 +18,10 @@ file(GLOB_RECURSE CODEATLAS_SOURCES CONFIGURE_DEPENDS
 list(APPEND CODEATLAS_SOURCES "${CMAKE_SOURCE_DIR}/main.cpp")
 
 if(WIN32)
+    # Иконка exe - ресурсом (путь к .ico полный: rc ищет относительные пути от своей папки сборки)
+    set(CODEATLAS_ICON_PATH "${CMAKE_SOURCE_DIR}/Resources/Icons/CodeAtlas.ico")
+    configure_file(${CMAKE_SOURCE_DIR}/Resources/CodeAtlas.rc.in ${CMAKE_BINARY_DIR}/CodeAtlas.rc @ONLY)
+    list(APPEND CODEATLAS_SOURCES ${CMAKE_BINARY_DIR}/CodeAtlas.rc)
     add_executable(CodeAtlas WIN32 ${CODEATLAS_SOURCES})
 else()
     add_executable(CodeAtlas ${CODEATLAS_SOURCES})

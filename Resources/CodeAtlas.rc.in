@@ -1,0 +1,2 @@
+// Иконка exe (Проводник, панель задач, заголовок окна - SDL берёт первую иконку exe сам)
+IDI_CODEATLAS ICON "@CODEATLAS_ICON_PATH@"

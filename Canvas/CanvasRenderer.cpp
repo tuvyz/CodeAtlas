@@ -83,10 +83,11 @@ float SdfFont::measure(const std::wstring &text, float size) {
     return width * size / basePixelSize;
 }
 
-// Текст в слой: левый край и середина строки по высоте прописных, высота шрифта size (единицы холста);
-// длиннее maxWidth (0 - без границы) - обрезается с многоточием. Возвращает ширину
+// Текст в слой: левый край и середина строки по высоте прописных, высота шрифта size (единицы холста, у isScreenSized - пиксели экрана);
+// длиннее maxWidth (0 - без границы, в тех же единицах) - обрезается с многоточием. Возвращает ширину.
+// У текста постоянного размера leftMiddle - точка привязки на холсте, screenOffset - сдвиг от неё в пикселях экрана
 float SdfFont::addText(CanvasLayer &layer, const std::wstring &text, glm::vec2 leftMiddle, float size, glm::vec4 color, glm::vec2 zoomFade,
-                       float maxWidth, bool isScreenSized) {
+                       float maxWidth, bool isScreenSized, glm::vec2 screenOffset) {
     float scale = size / basePixelSize;
     std::wstring shown = text;
     if (maxWidth > 0 && measure(text, size) > maxWidth) {
@@ -102,7 +103,7 @@ float SdfFont::addText(CanvasLayer &layer, const std::wstring &text, glm::vec2 l
 
     // Текст постоянного размера на экране строится в пикселях от точки привязки
     glm::vec3 anchor = isScreenSized ? glm::vec3(leftMiddle, 1) : glm::vec3(0);
-    glm::vec2 origin = isScreenSized ? glm::vec2(0) : leftMiddle;
+    glm::vec2 origin = isScreenSized ? screenOffset : leftMiddle;
     float baseline = origin.y + capHeight * scale * 0.5f;
     float pen = origin.x;
     for (wchar_t character : shown) {
@@ -243,11 +244,13 @@ layout(location = 5) in vec3 anchor;
 
 out vec2 uv;
 flat out vec4 glyphColor;
+flat out float isScreenText;
 
 void main() {
     vec2 t = corner * 0.5 + 0.5;
     vec2 local = mix(rect.xy, rect.zw, t);
     gl_Position = worldToClip(anchor.z > 0.5 ? anchor.xy + local / zoom : local);
+    isScreenText = anchor.z;
     uv = mix(uvRect.xy, uvRect.zw, t);
     glyphColor = vec4(color.rgb, color.a * zoomVisibility(zoomFade));
 }
@@ -256,6 +259,7 @@ void main() {
 static const char *glyphFragmentCode = R"(
 in vec2 uv;
 flat in vec4 glyphColor;
+flat in float isScreenText;
 uniform sampler2D atlas;
 out vec4 outColor;
 
@@ -264,6 +268,13 @@ void main() {
     float width = max(fwidth(distance) * 0.7, 0.01);
     float alpha = smoothstep(0.5 - width, 0.5 + width, distance);
     outColor = vec4(glyphColor.rgb, glyphColor.a * alpha);
+
+    // Подписи дальнего вида лежат поверх блоков: светлый ореол вокруг букв, чтобы читались
+    if (isScreenText > 0.5) {
+        float halo = smoothstep(0.18 - width, 0.18 + width, distance);
+        vec3 haloColor = vec3(1.0, 0.992, 0.976);
+        outColor = vec4(mix(haloColor, glyphColor.rgb, alpha), glyphColor.a * max(alpha, halo * 0.95));
+    }
     if (outColor.a < 0.003)
         discard;
 }

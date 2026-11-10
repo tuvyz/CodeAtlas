@@ -10,6 +10,7 @@
 #include <GL/glew.h>
 #include <SDL.h>
 #include <VisorGUI/vgui.h>
+#include <VisorGUI/Third/stb_image.h>
 #include "Analyzer/Analyzer.h"
 #include "Graph/Graph.h"
 #include "Project/ProjectTemplate.h"

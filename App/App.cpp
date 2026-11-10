@@ -146,6 +146,20 @@ bool App::initWindow() {
         Debug() << "Окно не создано:" << SDL_GetError();
         return false;
     }
+    // Иконка окна: под Windows SDL берёт иконку из ресурсов exe сам (с готовыми мелкими размерами), здесь - из картинки
+#ifndef _WIN32
+    {
+        int iconWidth = 0, iconHeight = 0, channels = 0;
+        std::string iconPath = (resourceDir() / "Icons" / "CodeAtlas.png").string();
+        unsigned char *iconPixels = stbi_load(iconPath.c_str(), &iconWidth, &iconHeight, &channels, 4);
+        if (iconPixels != nullptr) {
+            SDL_Surface *iconSurface = SDL_CreateRGBSurfaceWithFormatFrom(iconPixels, iconWidth, iconHeight, 32, iconWidth * 4, SDL_PIXELFORMAT_RGBA32);
+            SDL_SetWindowIcon(window, iconSurface);
+            SDL_FreeSurface(iconSurface);
+            stbi_image_free(iconPixels);
+        }
+    }
+#endif
     glContext = SDL_GL_CreateContext(window);
     SDL_GL_SetSwapInterval(1);
     glewExperimental = GL_TRUE;
@@ -181,16 +195,23 @@ void App::createGui() {
     topBar->enableScrollers(false);
     gui->addGuiObject(topBar);
 
-    auto *title = new vgui::Label(vgui::MySize<double>(130, 30), glm::dvec2(18, 13), fixedSize, inParent, glm::dvec2(0, 0), L"CodeAtlas");
+    // Значок программы; щелчок - вся карта
+    auto *logoButton = new vgui::Button(vgui::MySize<double>(32, 32), glm::dvec2(14, 12), fixedSize, inParent, glm::dvec2(0, 0), L"", true);
+    logoButton->setContextImage((resourceDir() / "Icons" / "CodeAtlas.png").wstring());
+    logoButton->setToolTip(L"Вся карта (F)");
+    topBar->addChild(logoButton);
+    logoButton->eventManager().subscribe<vgui::Button::Click_Event>(this, [this](const vgui::Button::Click_Event &) {mapView.fitAll();});
+
+    auto *title = new vgui::Label(vgui::MySize<double>(120, 30), glm::dvec2(54, 13), fixedSize, inParent, glm::dvec2(0, 0), L"CodeAtlas");
     title->setFontSize(19);
     title->setTextColor(accentColor);
     topBar->addChild(title);
 
-    projectEdit = new vgui::LineEdit(vgui::MySize<double>(430, 34), glm::dvec2(150, 11), fixedSize, inParent);
+    projectEdit = new vgui::LineEdit(vgui::MySize<double>(430, 34), glm::dvec2(186, 11), fixedSize, inParent);
     projectEdit->setToolTip(L"Папка проекта: в ней codeatlas.yaml (необязательно) и папка сборки с compile_commands.json");
     topBar->addChild(projectEdit);
 
-    auto *browseButton = new vgui::Button(vgui::MySize<double>(36, 34), glm::dvec2(586, 11), fixedSize, inParent, glm::dvec2(0, 0), L"…");
+    auto *browseButton = new vgui::Button(vgui::MySize<double>(36, 34), glm::dvec2(622, 11), fixedSize, inParent, glm::dvec2(0, 0), L"…");
     browseButton->setToolTip(L"CMakeLists.txt или codeatlas.yaml - открыть проект; compile_commands.json - папка сборки открытого проекта");
     topBar->addChild(browseButton);
     browseButton->eventManager().subscribe<vgui::Button::Click_Event>(this, [this](const vgui::Button::Click_Event &) {
@@ -213,23 +234,23 @@ void App::createGui() {
         openProject(chosen.parent_path().generic_wstring());
     });
 
-    auto *openButton = new vgui::Button(vgui::MySize<double>(100, 34), glm::dvec2(628, 11), fixedSize, inParent, glm::dvec2(0, 0), L"Открыть");
+    auto *openButton = new vgui::Button(vgui::MySize<double>(100, 34), glm::dvec2(664, 11), fixedSize, inParent, glm::dvec2(0, 0), L"Открыть");
     topBar->addChild(openButton);
     openButton->eventManager().subscribe<vgui::Button::Click_Event>(this, [this](const vgui::Button::Click_Event &) {
         openProject(projectEdit->text());
     });
 
-    scanButton = new vgui::Button(vgui::MySize<double>(136, 34), glm::dvec2(734, 11), fixedSize, inParent, glm::dvec2(0, 0), L"Сканировать");
+    scanButton = new vgui::Button(vgui::MySize<double>(136, 34), glm::dvec2(770, 11), fixedSize, inParent, glm::dvec2(0, 0), L"Сканировать");
     scanButton->setToolTip(L"Разобрать проект clang'ом и снять снимок графа на текущем коммите (F5)");
     topBar->addChild(scanButton);
     scanButton->eventManager().subscribe<vgui::Button::Click_Event>(this, [this](const vgui::Button::Click_Event &) {startScan();});
 
-    statusLabel = new vgui::Label(vgui::MySize<double>(470, 30), glm::dvec2(886, 13), fixedSize, inParent);
+    statusLabel = new vgui::Label(vgui::MySize<double>(440, 30), glm::dvec2(922, 13), fixedSize, inParent);
     statusLabel->setFontSize(13);
     statusLabel->setTextColor(mutedColor);
     topBar->addChild(statusLabel);
 
-    scanProgress = new vgui::ProgressBar(vgui::MySize<double>(300, 4), glm::dvec2(886, 44), fixedSize, inParent);
+    scanProgress = new vgui::ProgressBar(vgui::MySize<double>(300, 4), glm::dvec2(922, 44), fixedSize, inParent);
     scanProgress->setVisible(false);
     topBar->addChild(scanProgress);
 
@@ -621,6 +642,34 @@ void App::rebuildDetails() {
         addLabel(project.name, 20, inkColor);
         addLabel(L"Функций " + std::to_wstring(kindCounts[0]) + L", типов " + std::to_wstring(kindCounts[1]), 13, mutedColor);
         addLabel(L"Компонентов " + std::to_wstring(kindCounts[2]) + L", событий " + std::to_wstring(kindCounts[3]), 13, mutedColor);
+
+        // Обозначения образцами - как на холсте: образец слева, подпись справа
+        y += 14;
+        addLabel(L"ОБОЗНАЧЕНИЯ", 12, accentColor);
+        y += 4;
+        auto addLegendRow = [&](const char *imageName, const std::wstring &text) {
+            auto *sample = new vgui::Button(vgui::MySize<double>(48, 18), glm::dvec2(left, y + 2), fixedSize, inParent, glm::dvec2(0, 0), L"", true);
+            sample->setContextImage((resourceDir() / "Legend" / (std::string(imageName) + ".png")).wstring());
+            detailsPanel->addChild(sample);
+            auto *label = new vgui::Label(vgui::MySize<double>(width - 60, 22), glm::dvec2(left + 60, y), fixedSize, inParent, glm::dvec2(0, 0), text);
+            label->setFontSize(13);
+            label->setTextColor(inkColor);
+            detailsPanel->addChild(label);
+            y += 26;
+        };
+        addLegendRow("call", L"вызов, в кружке - порядок");
+        addLegendRow("read", L"чтение данных");
+        addLegendRow("write", L"запись данных");
+        y += 6;
+        addLegendRow("function", L"функция (полоска - цвет файла)");
+        addLegendRow("type", L"тип");
+        addLegendRow("component", L"компонент");
+        addLegendRow("event", L"событие");
+        y += 6;
+        addLegendRow("added", L"новое с прошлого снимка");
+        addLegendRow("changed", L"изменённое");
+        addLegendRow("removed", L"удалённое");
+
         y += 14;
         addLabel(L"УПРАВЛЕНИЕ", 12, accentColor);
         y += 4;
@@ -629,11 +678,6 @@ void App::rebuildDetails() {
                                     L"Правая кнопка - меню: пометка, раскладка", L"Ctrl+Z - отменить перестановку", L"F - вся карта, Esc - снять выбор",
                                     L"F5 - сканировать"})
             addParagraph(line, 13, inkColor);
-        y += 14;
-        addLabel(L"ОБОЗНАЧЕНИЯ", 12, accentColor);
-        y += 4;
-        addParagraph(L"Скруглённый блок - функция, со срезанными углами - тип, наклонный зелёный - компонент, наклонный оранжевый - событие. "
-                     L"Серые стрелки - вызовы с номером по порядку, синие - чтение данных, оранжевые - запись.", 13, inkColor);
         return;
     }
 

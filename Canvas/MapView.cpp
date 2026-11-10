@@ -17,6 +17,22 @@ glm::vec4 folderAccent(int colorIndex) {
     return hexColor(folderAccents[colorIndex % int(std::size(folderAccents))]);
 }
 
+// Цвет файла: тёмные различимые тона для имени на светлом; по имени без расширения - у Name.h и Name.cpp один цвет
+const uint32_t fileColors[] = {0x2F6FDF, 0xC0392B, 0x2E8B57, 0x8E44AD, 0xD35400, 0x138D90, 0xA8870A, 0xC2185B, 0x4A6A8A, 0x8D5524, 0x0B7A9E, 0x5E8C1F};
+glm::vec4 fileColor(const std::wstring &file) {
+    size_t slash = file.rfind(L'/');
+    std::wstring name = slash == std::wstring::npos ? file : file.substr(slash + 1);
+    size_t dot = name.find(L'.');
+    if (dot != std::wstring::npos)
+        name.erase(dot);
+    uint32_t hash = 2166136261u;
+    for (wchar_t character : name) {
+        hash ^= uint32_t(std::towlower(character));
+        hash *= 16777619u;
+    }
+    return hexColor(fileColors[hash % uint32_t(std::size(fileColors))]);
+}
+
 // Фигура по прямоугольнику холста
 ShapeInstance boxShape(const LayoutRect &rect, ShapeKind kind, float corner, glm::vec4 fill, glm::vec4 border, float borderWidth) {
     ShapeInstance shape;
@@ -277,25 +293,41 @@ void MapView::buildScene() {
         float depthAppearZoom = area.depth == 1 ? 0.0f : area.depth == 2 ? 0.3f : 0.36f;
         float appearZoom = std::max(depthAppearZoom, (font.measure(name, screenSize) + 24) / float(area.rect.size.x));
         font.addText(areaLayer, name, labelPosition, labelSize, label, glm::vec2(switchZoom, 0), float(area.rect.size.x) - 36);
-        if (appearZoom < switchZoom * 0.75f)
-            font.addText(overlayLayer, name, glm::vec2(area.rect.position) + glm::vec2(10, 12), screenSize, label, glm::vec2(appearZoom, switchZoom * 0.75f),
-                         0, true);
+        if (appearZoom < switchZoom * 0.5625f)
+            font.addText(overlayLayer, name, glm::vec2(area.rect.position), screenSize, label, glm::vec2(appearZoom, switchZoom * 0.5625f), 0, true,
+                         glm::vec2(8, screenSize * 0.5f + 5));
     }
 
-    // Рамки файлов с тенью; имя файла в полосе сверху, крупное - для дальнего вида
+    // Рамки файлов с тенью; полоса имени тонирована цветом файла, имя - этим цветом
     for (const FileFrame &frame : frames) {
+        glm::vec4 color = fileColor(frame.file);
         ShapeInstance shadow = boxShape(LayoutRect{frame.rect.position + glm::dvec2(0, 2.5), frame.rect.size}, ShapeKind::RoundBox, 9,
                                         hexColor(0x463718, 0.08f), glm::vec4(0), 0);
         areaLayer.shapes.push_back(shadow);
-        areaLayer.shapes.push_back(boxShape(frame.rect, ShapeKind::RoundBox, 9, hexColor(0xFFFDF9), hexColor(0xDCD5C9), 1));
-        // Имя файла: вблизи - размером холста, издали (от масштаба 0.3) - 11 пикселей на экране
-        constexpr float fileScreenSize = 11;
-        constexpr float fileAppearZoom = 0.3f;
+        areaLayer.shapes.push_back(boxShape(frame.rect, ShapeKind::RoundBox, 9, hexColor(0xFFFDF9), glm::mix(hexColor(0xDCD5C9), color, 0.35f), 1.2f));
+
+        // Полоса имени: скруглённая сверху (нижние углы закрыты прямоугольником)
+        glm::vec4 headerFill = glm::mix(hexColor(0xFFFFFF), color, 0.13f);
+        LayoutRect header{frame.rect.position + glm::dvec2(1.5, 1.5), glm::dvec2(frame.rect.size.x - 3, Layout::frameHeaderHeight - 4)};
+        areaLayer.shapes.push_back(boxShape(header, ShapeKind::RoundBox, 7.5f, headerFill, glm::vec4(0), 0));
+        LayoutRect headerBottom{header.position + glm::dvec2(0, header.size.y * 0.5), glm::dvec2(header.size.x, header.size.y * 0.5)};
+        areaLayer.shapes.push_back(boxShape(headerBottom, ShapeKind::RoundBox, 0, headerFill, glm::vec4(0), 0));
+
+        // Имя файла целиком, без многоточий: вблизи - размером холста в полосе имени (рамка не уже имени), издали - 13 пикселей на экране
+        // в верху рамки, когда помещается в её ширину (с зазором до соседней рамки); не помещается - не пишется, пока не приблизить
+        constexpr float fileScreenSize = 13;
+        float titleSize = float(Layout::frameTitleSize);
+        float switchZoom = fileScreenSize / titleSize;
         std::wstring name = lastPathPart(frame.file);
-        glm::vec2 namePosition = glm::vec2(frame.rect.position) + glm::vec2(12, Layout::frameHeaderHeight * 0.5f + 1);
-        font.addText(areaLayer, name, namePosition, 12, hexColor(0x7A7368), glm::vec2(fileScreenSize / 12, 0), float(frame.rect.size.x) - 24);
-        font.addText(areaLayer, name, glm::vec2(frame.rect.position) + glm::vec2(6, Layout::frameHeaderHeight * 0.5f), fileScreenSize,
-                     hexColor(0x6A6359), glm::vec2(fileAppearZoom, fileScreenSize / 12 * 0.75f), float(frame.rect.size.x) * fileAppearZoom - 6, true);
+        glm::vec4 titleColor = glm::mix(color, glm::vec4(0, 0, 0, 1), 0.12f);
+        glm::vec2 namePosition = glm::vec2(frame.rect.position) + glm::vec2(Layout::framePadding, (Layout::frameHeaderHeight - 2) * 0.5f);
+        font.addText(areaLayer, name, namePosition, titleSize, titleColor, glm::vec2(switchZoom, 0));
+        // Подписи сменяют друг друга без наложения: дальняя гаснет к 0.75 масштаба смены, ближняя проявляется после; дальняя - поверх блоков
+        float appearZoom = (font.measure(name, fileScreenSize) + 8) / float(frame.rect.size.x + Layout::frameGap * 0.8);
+        float farLabelEndZoom = switchZoom * 0.75f * 0.75f;
+        if (appearZoom < farLabelEndZoom)
+            font.addText(overlayLayer, name, glm::vec2(frame.rect.position), fileScreenSize, titleColor, glm::vec2(appearZoom, farLabelEndZoom), 0, true,
+                         glm::vec2(6, fileScreenSize * 0.5f + 4));
     }
 
     // Связи: выбранного (без выбора - под курсором), все - по галке «Все связи»
@@ -381,17 +413,10 @@ void MapView::buildScene() {
         text.a *= alpha;
         nodeLayer.shapes.push_back(boxShape(rect, shapeKind, corner, fill, border, borderWidth));
 
-        // Полоска цвета папки у функции
+        // Полоска цвета файла у функции
         float textLeft = 12;
         if (node.kind == NodeKind::Function) {
-            int colorIndex = 0;
-            for (const FileFrame &frame : frames) {
-                if (frame.file == node.file) {
-                    colorIndex = frame.colorIndex;
-                    break;
-                }
-            }
-            glm::vec4 accent = folderAccent(colorIndex);
+            glm::vec4 accent = fileColor(node.file);
             accent.a *= alpha;
             LayoutRect stripe{rect.position + glm::dvec2(4, 6), glm::dvec2(3, rect.size.y - 12)};
             nodeLayer.shapes.push_back(boxShape(stripe, ShapeKind::RoundBox, 1.5f, accent, glm::vec4(0), 0));

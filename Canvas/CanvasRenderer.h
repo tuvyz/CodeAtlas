@@ -68,9 +68,10 @@ public:
     bool load(const std::string &path);
 
     // Текст в слой: левый край и середина строки по высоте прописных, высота шрифта size (единицы холста, у isScreenSized - пиксели экрана);
-    // длиннее maxWidth (0 - без границы, в тех же единицах) - обрезается с многоточием. Возвращает ширину
+    // длиннее maxWidth (0 - без границы, в тех же единицах) - обрезается с многоточием. Возвращает ширину.
+    // У текста постоянного размера leftMiddle - точка привязки на холсте, screenOffset - сдвиг от неё в пикселях экрана
     float addText(CanvasLayer &layer, const std::wstring &text, glm::vec2 leftMiddle, float size, glm::vec4 color, glm::vec2 zoomFade = {0, 0},
-                  float maxWidth = 0, bool isScreenSized = false);
+                  float maxWidth = 0, bool isScreenSized = false, glm::vec2 screenOffset = {0, 0});
 
     // Ширина текста при высоте шрифта size
     float measure(const std::wstring &text, float size);
