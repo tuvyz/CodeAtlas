@@ -284,13 +284,42 @@ void MapView::buildScene() {
     }
     bool isFading = selectedNode >= 0;
 
+    // Сравнение с коммитом: изменённое ярко, остальное бледно, рамки файлов и области папок с изменениями обведены цветом изменения
+    // (толщина рамки - в пикселях экрана: видно и со всей карты). Изменение файла: 1 - только новое, 2 - есть изменённое или удалённое
+    std::vector<char> isNodeChanged(graph->nodes.size(), 0);
+    std::map<std::wstring, int> fileChanges;
+    if (isDiffShown) {
+        for (int nodeIndex = 0; nodeIndex < int(graph->nodes.size()); ++nodeIndex) {
+            DiffState state = nodeIndex < int(diffStates.size()) ? diffStates[nodeIndex] : DiffState::Same;
+            bool isUncommitted = isUncommittedShown && nodeIndex < int(uncommittedNodes.size()) && uncommittedNodes[nodeIndex];
+            if (state == DiffState::Same && !isUncommitted)
+                continue;
+            isNodeChanged[nodeIndex] = 1;
+            int &fileChange = fileChanges[graph->nodes[nodeIndex].file];
+            fileChange = std::max(fileChange, state == DiffState::Added ? 1 : 2);
+        }
+        for (size_t ghostIndex = 0; previousGraph != nullptr && ghostIndex < removedNodes.size() && ghostIndex < ghostRects.size(); ++ghostIndex) {
+            if (ghostRects[ghostIndex].size.x > 0)
+                fileChanges[previousGraph->nodes[removedNodes[ghostIndex]].file] = 2;
+        }
+    }
+    bool isChangeFocus = !fileChanges.empty();
+    auto changeColor = [](int change) {return change == 1 ? hexColor(0x3F9B57) : hexColor(0xD79E22);};
+    constexpr float changeBorderWidth = 2.5f; // Рамка файла или папки с изменениями, пиксели экрана
+
     // Области папок: заливка цветом папки верхнего уровня, сверху полоса имени во всю ширину тоном темнее. Имена папок и файлов -
     // размером холста при любом масштабе: карта масштабируется целиком, как одна картинка
     for (const FolderArea &area : folders) {
+        int folderChange = 0;
+        for (const auto &[file, change] : fileChanges) {
+            if (file.size() > area.path.size() && file.compare(0, area.path.size(), area.path) == 0 && file[area.path.size()] == L'/')
+                folderChange = std::max(folderChange, change);
+        }
+        bool isPale = isChangeFocus && folderChange == 0;
         glm::vec4 accent = folderAccent(area.colorIndex);
-        glm::vec4 fill = glm::mix(paperColor, accent, 0.06f + 0.035f * (area.depth - 1));
-        glm::vec4 border = glm::mix(paperColor, accent, 0.32f);
-        areaLayer.shapes.push_back(boxShape(area.rect, ShapeKind::RoundBox, 16, fill, border, 1));
+        glm::vec4 fill = glm::mix(paperColor, accent, (0.06f + 0.035f * (area.depth - 1)) * (isPale ? 0.4f : 1.0f));
+        glm::vec4 border = folderChange > 0 ? changeColor(folderChange) : glm::mix(paperColor, accent, isPale ? 0.12f : 0.32f);
+        areaLayer.shapes.push_back(boxShape(area.rect, ShapeKind::RoundBox, 16, fill, border, folderChange > 0 ? changeBorderWidth : 1));
 
         // Полоса имени: скруглённая сверху (нижние углы закрыты прямоугольником)
         glm::vec4 headerFill = glm::mix(fill, accent, 0.16f);
@@ -302,25 +331,35 @@ void MapView::buildScene() {
 
         float titleSize = float(Layout::folderTitleSizeAt(area.depth));
         glm::vec2 titlePosition = glm::vec2(area.rect.position) + glm::vec2(float(Layout::folderPadding), float(headerHeight) * 0.5f);
-        font.addText(areaLayer, lastPathPart(area.path), titlePosition, titleSize, glm::mix(accent, glm::vec4(0, 0, 0, 1), 0.28f));
+        glm::vec4 titleColor = glm::mix(accent, glm::vec4(0, 0, 0, 1), 0.28f);
+        titleColor.a *= isPale ? 0.4f : 1.0f;
+        font.addText(areaLayer, lastPathPart(area.path), titlePosition, titleSize, titleColor);
     }
 
     // Рамки файлов с тенью; полоса имени тонирована цветом файла, имя целиком (рамка не уже имени) - этим цветом
     for (const FileFrame &frame : frames) {
+        auto change = fileChanges.find(frame.file);
+        int frameChange = change == fileChanges.end() ? 0 : change->second;
+        bool isPale = isChangeFocus && frameChange == 0;
         glm::vec4 color = fileColor(frame.file);
         ShapeInstance shadow = boxShape(LayoutRect{frame.rect.position + glm::dvec2(0, 2.5), frame.rect.size}, ShapeKind::RoundBox, 9,
-                                        hexColor(0x463718, 0.08f), glm::vec4(0), 0);
+                                        hexColor(0x463718, isPale ? 0.03f : 0.08f), glm::vec4(0), 0);
         areaLayer.shapes.push_back(shadow);
-        areaLayer.shapes.push_back(boxShape(frame.rect, ShapeKind::RoundBox, 9, hexColor(0xFFFDF9), glm::mix(hexColor(0xDCD5C9), color, 0.35f), 1.2f));
+        glm::vec4 frameBorder = frameChange > 0 ? changeColor(frameChange) : glm::mix(hexColor(0xDCD5C9), color, isPale ? 0.1f : 0.35f);
+        glm::vec4 frameFill = isPale ? glm::mix(hexColor(0xFFFDF9), paperColor, 0.6f) : hexColor(0xFFFDF9);
+        areaLayer.shapes.push_back(boxShape(frame.rect, ShapeKind::RoundBox, 9, frameFill, frameBorder, frameChange > 0 ? changeBorderWidth : 1.2f));
 
-        // Полоса имени: скруглённая сверху (нижние углы закрыты прямоугольником)
-        glm::vec4 headerFill = glm::mix(hexColor(0xFFFFFF), color, 0.13f);
+        // Полоса имени: скруглённая сверху (нижние углы закрыты прямоугольником); у файла с изменениями - тоном изменения
+        glm::vec4 headerFill = frameChange > 0 ? glm::mix(hexColor(0xFFFFFF), changeColor(frameChange), 0.25f) :
+                                                 glm::mix(frameFill, color, isPale ? 0.04f : 0.13f);
         LayoutRect header{frame.rect.position + glm::dvec2(1.5, 1.5), glm::dvec2(frame.rect.size.x - 3, Layout::frameHeaderHeight() - 4)};
         areaLayer.shapes.push_back(boxShape(header, ShapeKind::RoundBox, 7.5f, headerFill, glm::vec4(0), 0));
         LayoutRect headerBottom{header.position + glm::dvec2(0, header.size.y * 0.5), glm::dvec2(header.size.x, header.size.y * 0.5)};
         areaLayer.shapes.push_back(boxShape(headerBottom, ShapeKind::RoundBox, 0, headerFill, glm::vec4(0), 0));
         glm::vec2 titlePosition = glm::vec2(frame.rect.position) + glm::vec2(Layout::framePadding, float(Layout::frameHeaderHeight() - 2) * 0.5f);
-        font.addText(areaLayer, lastPathPart(frame.file), titlePosition, float(Layout::frameTitleSize()), glm::mix(color, glm::vec4(0, 0, 0, 1), 0.12f));
+        glm::vec4 titleColor = glm::mix(color, glm::vec4(0, 0, 0, 1), 0.12f);
+        titleColor.a *= isPale ? 0.35f : 1.0f;
+        font.addText(areaLayer, lastPathPart(frame.file), titlePosition, float(Layout::frameTitleSize()), titleColor);
     }
 
     // Связи: выбранного (без выбора - под курсором), все - по галке «Все связи»
@@ -386,7 +425,15 @@ void MapView::buildScene() {
                 border = hexColor(0xD79E22);
             }
         }
-        float borderWidth = 1;
+        float borderWidth = isNodeChanged[nodeIndex] ? 2.0f : 1.0f;
+
+        // Неизменённое при сравнении - бледное
+        bool isPale = isChangeFocus && !isNodeChanged[nodeIndex];
+        if (isPale) {
+            fill = glm::mix(fill, paperColor, 0.6f);
+            border = glm::mix(border, paperColor, 0.6f);
+            text.a *= 0.4f;
+        }
         if (nodeIndex == hoveredNode) {
             border = glm::mix(border, hexColor(0x3C3833), 0.45f);
             borderWidth = 1.6f;
@@ -416,7 +463,7 @@ void MapView::buildScene() {
         float textLeft = 12;
         if (node.kind == NodeKind::Function) {
             glm::vec4 accent = fileColor(node.file);
-            accent.a *= alpha;
+            accent.a *= alpha * (isPale ? 0.35f : 1.0f);
             LayoutRect stripe{rect.position + glm::dvec2(4, 6) * double(scale), glm::dvec2(3 * scale, rect.size.y - 12 * scale)};
             nodeLayer.shapes.push_back(boxShape(stripe, ShapeKind::RoundBox, 1.5f * scale, accent, glm::vec4(0), 0));
             textLeft = 14;

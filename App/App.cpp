@@ -790,8 +790,8 @@ void App::showGraph(const std::string &selectedId) {
     mapView.selectedNode = selectedId.empty() ? -1 : shownGraph.findNode(selectedId);
     mapView.hoveredNode = -1;
     updateSearch(searchEdit->text());
-    updateComparison();
     statusLabel->setText(L"Узлов " + std::to_wstring(shownGraph.nodes.size()) + L", связей " + std::to_wstring(shownGraph.edges.size()));
+    updateComparison();
     mapView.invalidate();
     isDetailsDirty = true;
 }
@@ -845,6 +845,16 @@ void App::updateComparison() {
         Graph::compare(*compared, shownGraph, mapView.diffStates, mapView.removedNodes);
         mapView.previousGraph = compared;
         mapView.isDiffShown = true;
+
+        // Сводка в строке состояния
+        int addedCount = int(std::count(mapView.diffStates.begin(), mapView.diffStates.end(), DiffState::Added));
+        int changedCount = int(std::count(mapView.diffStates.begin(), mapView.diffStates.end(), DiffState::Changed));
+        int removedCount = int(mapView.removedNodes.size());
+        if (addedCount + changedCount + removedCount == 0)
+            statusLabel->setText(L"С " + shortHash + L" в коде ничего не менялось");
+        else
+            statusLabel->setText(L"С " + shortHash + L": новых " + std::to_wstring(addedCount) + L", изменённых " + std::to_wstring(changedCount) +
+                                 L", удалённых " + std::to_wstring(removedCount));
 
         // Места призраков: строками под блоками своего файла в ширину рамки (прежние места могли занять новые блоки, а файл - переехать);
         // файла на карте больше нет - прежнее место узла, если было
@@ -1185,7 +1195,6 @@ void App::pollJob() {
         }
         commitGraphs[jobCommit] = std::move(jobGraph);
         updateComparison();
-        statusLabel->setText(L"Граф коммита " + stringToWString(jobCommit.substr(0, 7)) + L" за " + secondsText);
         Debug() << "CodeAtlas: граф коммита" << jobCommit.substr(0, 7) << "готов за" << seconds << "с";
         break;
 
