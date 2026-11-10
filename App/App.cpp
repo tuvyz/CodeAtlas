@@ -756,9 +756,14 @@ void App::rebuildDetails() {
         addLabel(title + L" - " + std::to_wstring(count), 12, mutedColor);
         y += 2;
     };
+    // Кнопка узла; узел из другого файла с неоднозначным именем (main шейдера и т.п.) - с именем файла
     auto addNodeButton = [&](int nodeIndex, const std::wstring &prefix) {
         const GraphNode &node = shownGraph.nodes[nodeIndex];
-        auto *button = new vgui::Button(vgui::MySize<double>(width, 28), glm::dvec2(left, y), fixedSize, inParent, glm::dvec2(0, 0), prefix + node.name);
+        bool isShader = node.id.rfind("glsl:", 0) == 0;
+        bool isOtherFile = mapView.selectedNode >= 0 && shownGraph.nodes[mapView.selectedNode].file != node.file;
+        std::wstring fileSuffix = isShader && isOtherFile ? L" · " + std::filesystem::path(node.file).filename().wstring() : std::wstring();
+        auto *button = new vgui::Button(vgui::MySize<double>(width, 28), glm::dvec2(left, y), fixedSize, inParent, glm::dvec2(0, 0),
+                                        prefix + node.name + fileSuffix);
         button->setFontSize(13);
         button->setTextAlignedLeft(true);
         button->setToolTip(node.file + L":" + std::to_wstring(node.line));
@@ -894,14 +899,24 @@ void App::rebuildDetails() {
     else
         addParagraph(node.comment, 14, inkColor);
 
+    // Вызовы по порядку; связи без порядка (из C++ к main шейдера) - отдельным списком
     MapView::NodeLinks links = mapView.linksOf(nodeIndex);
-    if (!links.callees.empty()) {
+    std::vector<std::pair<int, int>> orderedCallees;
+    std::vector<int> shaders;
+    for (const auto &[callee, order] : links.callees) {
+        if (order > 0)
+            orderedCallees.push_back({callee, order});
+        else
+            shaders.push_back(callee);
+    }
+    addNodeList(L"Шейдеры", shaders);
+    if (!orderedCallees.empty()) {
         constexpr size_t maxListed = 60;
-        addSection(L"Вызывает по порядку", links.callees.size());
-        for (size_t i = 0; i < links.callees.size() && i < maxListed; ++i)
-            addNodeButton(links.callees[i].first, std::to_wstring(links.callees[i].second) + L". ");
-        if (links.callees.size() > maxListed)
-            addLabel(L"и ещё " + std::to_wstring(links.callees.size() - maxListed), 12, mutedColor);
+        addSection(L"Вызывает по порядку", orderedCallees.size());
+        for (size_t i = 0; i < orderedCallees.size() && i < maxListed; ++i)
+            addNodeButton(orderedCallees[i].first, std::to_wstring(orderedCallees[i].second) + L". ");
+        if (orderedCallees.size() > maxListed)
+            addLabel(L"и ещё " + std::to_wstring(orderedCallees.size() - maxListed), 12, mutedColor);
     }
     bool isFunction = node.kind == NodeKind::Function;
     addNodeList(L"Вызывают", links.callers);
@@ -1031,9 +1046,10 @@ int App::run(const std::wstring &projectRoot) {
 
     Uint64 previousTicks = SDL_GetPerformanceCounter();
     while (isRunning) {
-        // Без движения на экране окно ждёт событий (кадр раз в 100 мс - для мигания каретки и подсказок)
+        // Без движения на экране окно ждёт событий (кадр раз в 100 мс - для мигания каретки и подсказок, при сканировании - раз в 50 мс
+        // для хода: кадры подряд отнимали бы у разбора процессор)
         SDL_Event event;
-        bool hasEvent = isScanning || mapView.isAnimating() ? SDL_PollEvent(&event) : SDL_WaitEventTimeout(&event, 100);
+        bool hasEvent = mapView.isAnimating() ? SDL_PollEvent(&event) : SDL_WaitEventTimeout(&event, isScanning ? 50 : 100);
         while (hasEvent) {
             if (event.type == SDL_QUIT)
                 isRunning = false;

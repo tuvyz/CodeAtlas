@@ -18,6 +18,7 @@
 #include <clang-c/Index.h>
 #include <clang-c/CXCompilationDatabase.h>
 #include "Graph/Graph.h"
+#include "Analyzer/ShaderParser.h"
 #include "Project/ProjectTemplate.h"
 #include "Global/Logging_Fmt.h"
 

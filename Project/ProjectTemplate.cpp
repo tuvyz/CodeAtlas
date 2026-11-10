@@ -12,6 +12,9 @@ bool ProjectTemplate::load(const std::wstring &projectRoot) {
     componentCalls.clear();
     writeCalls.clear();
     eventRegex.clear();
+    shaderDirs.clear();
+    shaderExtensions = {"glsl", "vert", "frag", "comp", "geom", "tesc", "tese"};
+    shaderNameFiles.clear();
 
     // Папка данных у CodeAtlas: в ней же выбранная в окне папка сборки и путь проекта (чтобы было видно, чья папка)
     dataDir = dataDirFor(root).generic_wstring();
@@ -78,6 +81,14 @@ bool ProjectTemplate::load(const std::wstring &projectRoot) {
             writeCalls = items;
         else if (key == "event_regex")
             eventRegex = value;
+        else if (key == "shaders")
+            for (const std::string &item : items)
+                shaderDirs.push_back(stringToWString(item));
+        else if (key == "shader_extensions")
+            shaderExtensions = items;
+        else if (key == "shader_names")
+            for (const std::string &item : items.empty() ? std::vector<std::string>{value} : items)
+                shaderNameFiles.push_back(stringToWString(item));
     }
     return true;
 }

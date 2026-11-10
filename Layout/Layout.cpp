@@ -153,8 +153,10 @@ void Layout::placeFileGrid(const Graph &graph, std::vector<int> nodes, glm::dvec
 }
 
 
-// Полная раскладка: папки областями, файлы рамками, блоки сеткой по строкам файла
-void Layout::relayout(const Graph &graph) {
+// Упаковка файлов полками по папкам, как в полной раскладке: левые верхние углы рамок от начала упаковки, возвращает её размер.
+// Папки считаются от base: её файлы и подпапки - без её полосы имени и отступа, подпапки - областями с полосой и отступом
+glm::dvec2 Layout::packFiles(const Graph &graph, const std::map<std::wstring, std::vector<int>> &byFile, const std::vector<std::wstring> &files,
+                             const std::wstring &base, std::map<std::wstring, glm::dvec2> &fileOffsets) {
     // Папка: подпапки и файлы, после упаковки - смещения содержимого от её левого верхнего угла
     struct Folder {
         std::map<std::wstring, Folder> children;
@@ -164,13 +166,16 @@ void Layout::relayout(const Graph &graph) {
         std::vector<std::pair<std::wstring, glm::dvec2>> fileOffsets;
     };
 
-    std::map<std::wstring, std::vector<int>> byFile = nodesByFile(graph);
     Folder root;
-    for (const auto &[file, nodes] : byFile) {
+    for (const std::wstring &file : files) {
         Folder *folder = &root;
         std::filesystem::path parent = std::filesystem::path(file).parent_path();
-        for (const std::filesystem::path &part : parent)
-            folder = &folder->children[part.wstring()];
+        if (!base.empty())
+            parent = parent.lexically_relative(std::filesystem::path(base));
+        for (const std::filesystem::path &part : parent) {
+            if (part != ".")
+                folder = &folder->children[part.wstring()];
+        }
         folder->files.push_back(file);
     }
 
@@ -187,7 +192,7 @@ void Layout::relayout(const Graph &graph) {
             items.push_back(Item{&child, std::wstring(), child.size});
         }
         for (const std::wstring &file : folder.files)
-            items.push_back(Item{nullptr, file, fileGridFrameSize(graph, byFile[file])});
+            items.push_back(Item{nullptr, file, fileGridFrameSize(graph, byFile.at(file))});
 
         double area = 0;
         double widest = 0;
@@ -221,19 +226,33 @@ void Layout::relayout(const Graph &graph) {
     pack(pack, root, true);
 
     // Места сверху вниз
-    nodePositions.clear();
     auto place = [&](auto &self, Folder &folder, glm::dvec2 origin) -> void {
         for (auto &[child, offset] : folder.folderOffsets)
             self(self, *child, origin + offset);
         for (auto &[file, offset] : folder.fileOffsets)
-            placeFileGrid(graph, byFile[file], origin + offset);
+            fileOffsets[file] = origin + offset;
     };
     place(place, root, glm::dvec2(0, 0));
+    return root.size;
 }
 
 
-// Места для узлов без места: в рамке своего файла под блоками, новый файл - рядом с файлами своей папки на свободном месте;
-// ни одного места нет - полная раскладка. Возвращает число разложенных узлов
+// Полная раскладка: папки областями, файлы рамками, блоки сеткой по строкам файла
+void Layout::relayout(const Graph &graph) {
+    std::map<std::wstring, std::vector<int>> byFile = nodesByFile(graph);
+    std::vector<std::wstring> files;
+    for (const auto &[file, nodes] : byFile)
+        files.push_back(file);
+    std::map<std::wstring, glm::dvec2> fileOffsets;
+    packFiles(graph, byFile, files, std::wstring(), fileOffsets);
+    nodePositions.clear();
+    for (const auto &[file, offset] : fileOffsets)
+        placeFileGrid(graph, byFile[file], offset);
+}
+
+
+// Места для узлов без места: в рамке своего файла под блоками, новый файл - рядом с файлами своей папки на свободном месте,
+// новая папка целиком - упаковкой полной раскладки одним блоком; ни одного места нет - полная раскладка. Возвращает число разложенных узлов
 int Layout::placeNewNodes(const Graph &graph) {
     int unplacedCount = 0;
     bool hasPlaced = false;
@@ -277,12 +296,10 @@ int Layout::placeNewNodes(const Graph &graph) {
         frames[file] = fileFrame(graph, nodes);
     }
 
-    // Новый файл: справа от рамок файлов своей папки (нет таких - ближайшей папки выше, нет и их - справа от всего), на свободном месте
-    for (auto &[file, nodes] : newFiles) {
-        glm::dvec2 size = fileGridFrameSize(graph, nodes);
+    // Желаемое место нового: справа от рамок файлов папки folder (нет таких - ближайшей папки выше, нет и их - в начале холста)
+    auto desiredPlace = [&](std::filesystem::path folder) {
         LayoutRect neighbours;
         bool hasNeighbours = false;
-        std::filesystem::path folder = std::filesystem::path(file).parent_path();
         while (!hasNeighbours) {
             for (const auto &[otherFile, frame] : frames) {
                 std::filesystem::path otherFolder = std::filesystem::path(otherFile).parent_path();
@@ -301,16 +318,15 @@ int Layout::placeNewNodes(const Graph &graph) {
                 break;
             folder = folder.parent_path();
         }
-        glm::dvec2 desired = hasNeighbours ? glm::dvec2(neighbours.position.x + neighbours.size.x + frameGap, neighbours.position.y) : glm::dvec2(0, 0);
-
-        // Свободное место - по кольцам вокруг желаемого, шаг 60
+        return hasNeighbours ? glm::dvec2(neighbours.position.x + neighbours.size.x + frameGap, neighbours.position.y) : glm::dvec2(0, 0);
+    };
+    // Свободное место размера size - по кольцам вокруг желаемого, шаг 60
+    auto freePlace = [&](glm::dvec2 desired, glm::dvec2 size) {
         constexpr double searchStep = 60;
         constexpr int ringsCount = 120;
-        glm::dvec2 chosen = desired;
-        bool isFound = false;
-        for (int ring = 0; ring <= ringsCount && !isFound; ++ring) {
-            for (int dy = -ring; dy <= ring && !isFound; ++dy) {
-                for (int dx = -ring; dx <= ring && !isFound; ++dx) {
+        for (int ring = 0; ring <= ringsCount; ++ring) {
+            for (int dy = -ring; dy <= ring; ++dy) {
+                for (int dx = -ring; dx <= ring; ++dx) {
                     if (std::max(std::abs(dx), std::abs(dy)) != ring)
                         continue;
                     LayoutRect candidate{desired + glm::dvec2(dx, dy) * searchStep, size};
@@ -321,15 +337,44 @@ int Layout::placeNewNodes(const Graph &graph) {
                             break;
                         }
                     }
-                    if (isFree) {
-                        chosen = candidate.position;
-                        isFound = true;
-                    }
+                    if (isFree)
+                        return candidate.position;
                 }
             }
         }
+        return desired;
+    };
+
+    // Новая папка целиком (под ней нет ни одного файла с местами) - упаковкой полной раскладки, одним блоком рядом с папкой выше;
+    // новый файл в папке с местами - справа от её рамок
+    std::set<std::wstring> placedFolders{std::wstring()};
+    for (const auto &[file, frame] : frames) {
+        for (std::filesystem::path folder = std::filesystem::path(file).parent_path(); !folder.empty(); folder = folder.parent_path())
+            placedFolders.insert(folder.generic_wstring());
+    }
+    std::map<std::wstring, std::vector<std::wstring>> newFolderFiles;
+    for (auto &[file, nodes] : newFiles) {
+        std::filesystem::path newFolder;
+        for (std::filesystem::path folder = std::filesystem::path(file).parent_path(); !folder.empty() && placedFolders.count(folder.generic_wstring()) == 0;
+             folder = folder.parent_path())
+            newFolder = folder;
+        if (!newFolder.empty()) {
+            newFolderFiles[newFolder.generic_wstring()].push_back(file);
+            continue;
+        }
+        glm::dvec2 chosen = freePlace(desiredPlace(std::filesystem::path(file).parent_path()), fileGridFrameSize(graph, nodes));
         placeFileGrid(graph, nodes, chosen);
         frames[file] = fileFrame(graph, nodes);
+    }
+    for (const auto &[folder, files] : newFolderFiles) {
+        std::wstring base = std::filesystem::path(folder).parent_path().generic_wstring();
+        std::map<std::wstring, glm::dvec2> fileOffsets;
+        glm::dvec2 size = packFiles(graph, byFile, files, base, fileOffsets);
+        glm::dvec2 chosen = freePlace(desiredPlace(std::filesystem::path(base)), size);
+        for (const auto &[file, offset] : fileOffsets) {
+            placeFileGrid(graph, byFile[file], chosen + offset);
+            frames[file] = fileFrame(graph, byFile[file]);
+        }
     }
     return unplacedCount;
 }

@@ -22,6 +22,9 @@ struct ProjectTemplate {
     std::vector<std::string> componentCalls; // Вызовы, чей шаблонный аргумент - компонент (view, get, emplace и т.п.)
     std::vector<std::string> writeCalls;     // Из них - запись в компонент (emplace, remove и т.п.), остальные - чтение
     std::string eventRegex;                  // Компонент с таким именем - событие
+    std::vector<std::wstring> shaderDirs;    // Папки шейдеров от корня (идут на карту, даже если исключены); пусто - весь проект без exclude
+    std::vector<std::string> shaderExtensions;   // Расширения файлов шейдеров без точки
+    std::vector<std::wstring> shaderNameFiles;   // Файлы имён шейдеров от корня: строки «ИМЯ ТИП "путь"», как в .rc; пусто - все .rc в корне
     std::wstring dataDir;                    // Папка данных проекта у CodeAtlas (раскладка, история): в проект ничего не пишется
     std::wstring compileCommandsOverride;    // Папка с compile_commands.json, выбранная в окне (хранится в папке данных), пусто - не выбрана
 

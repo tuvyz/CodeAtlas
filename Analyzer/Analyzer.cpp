@@ -47,12 +47,35 @@ struct PendingAccess {
     bool isWrite;
 };
 
+// Шейдеры в C++: имя шейдера строкой (как в файле имён или путь) в теле функции; в вызове - ещё define строками
+// ("#define X") и переменная программы первым аргументом: функции, которые к ней обращаются, тоже запускают этот шейдер
+struct PendingShaderUse {
+    std::string functionId;
+    std::vector<std::string> shaderNames;
+    std::set<std::string> defines;
+    std::string programId;
+};
+
+// Обращение функции к полю или переменной с типом-структурой (вдруг это программа шейдера)
+struct PendingVariableUse {
+    std::string functionId;
+    std::string variableId;
+};
+
 // Что собрал один поток
 struct WorkerResult {
     std::vector<GraphNode> nodes;
     std::vector<PendingCall> calls;
     std::vector<PendingAccess> accesses;
     std::set<std::string> componentTypeIds; // Типы из шаблонных аргументов вызовов компонентов
+    std::vector<PendingShaderUse> shaderUses;
+    std::vector<PendingVariableUse> variableUses;
+};
+
+// Шейдеры проекта: разобранные файлы по пути от корня и путь по имени, каким шейдер зовут в коде (имя из файла имён, путь, имя файла)
+struct ShaderCatalog {
+    std::map<std::wstring, ShaderFile> files;
+    std::map<std::string, std::wstring> fileByName;
 };
 
 // Общее для потоков одного сканирования
@@ -62,6 +85,7 @@ struct SharedScan {
     std::set<std::string> writeCalls;
     std::mutex visitedMutex;
     std::set<std::string> visitedDefinitions; // id узлов, чьи определения уже разобраны (заголовки входят во многие единицы)
+    const ShaderCatalog *shaders = nullptr;
 };
 
 
@@ -74,6 +98,8 @@ struct FunctionVisit {
     std::string ownerTypeId;         // Класс метода: чтение своих полей связью не считается
     int callsCount = 0;              // Счётчик порядка вызовов
     std::set<std::string> calledIds; // Уже учтённые вызываемые: порядок - по первому вызову
+    std::set<std::string> variableIds; // Поля и переменные с типом-структурой, к которым функция обращается
+    std::set<unsigned> shaderLiterals;  // Строки с именами шейдеров, уже учтённые в сборке программы (хэши курсоров)
 };
 
 // Режим обхода поддерева тела: запись - левая часть присваивания, операнд ++ и --
@@ -361,6 +387,50 @@ private:
             function.ownerTypeId = nodeId(parent);
         BodyVisit body{&function, false};
         clang_visitChildren(cursor, &UnitParser::visitBody, &body);
+        for (const std::string &variableId : function.variableIds)
+            result.variableUses.push_back(PendingVariableUse{id, variableId});
+    }
+
+    // Строка из литерала как написана в коде: без префикса (L, u8 и т.п.) и кавычек
+    static std::string literalText(CXCursor literal) {
+        std::string spelling = takeString(clang_getCursorSpelling(literal));
+        size_t open = spelling.find('"');
+        size_t close = spelling.rfind('"');
+        return open != std::string::npos && close > open ? spelling.substr(open + 1, close - open - 1) : std::string();
+    }
+
+    // Поле класса или переменная вне функций с типом-структурой - такой может быть программа шейдера (локальные не в счёт)
+    static bool isRecordVariable(CXCursor variable) {
+        CXCursorKind variableKind = clang_getCursorKind(variable);
+        if (variableKind != CXCursor_FieldDecl && variableKind != CXCursor_VarDecl)
+            return false;
+        if (clang_getCanonicalType(clang_getCursorType(variable)).kind != CXType_Record)
+            return false;
+        CXCursorKind parentKind = clang_getCursorKind(clang_getCursorSemanticParent(variable));
+        return parentKind == CXCursor_TranslationUnit || parentKind == CXCursor_Namespace || parentKind == CXCursor_StructDecl ||
+               parentKind == CXCursor_ClassDecl || parentKind == CXCursor_ClassTemplate;
+    }
+
+    // Поле или переменная с типом-структурой, на которую ссылается курсор (или первое такое внутри него); пусто - не ссылка
+    static std::string recordVariableId(CXCursor cursor) {
+        std::string found;
+        auto check = [&](CXCursor candidate) {
+            CXCursorKind kind = clang_getCursorKind(candidate);
+            if (kind != CXCursor_DeclRefExpr && kind != CXCursor_MemberRefExpr)
+                return false;
+            CXCursor variable = clang_getCursorReferenced(candidate);
+            if (!isRecordVariable(variable))
+                return false;
+            found = takeString(clang_getCursorUSR(variable));
+            return true;
+        };
+        if (check(cursor))
+            return found;
+        clang_visitChildren(cursor, [](CXCursor child, CXCursor, CXClientData data) {
+            auto *checkChild = static_cast<decltype(check)*>(data);
+            return (*checkChild)(child) ? CXChildVisit_Break : CXChildVisit_Recurse;
+        }, &check);
+        return found;
     }
 
     // Учёт доступа функции к данным типа
@@ -422,6 +492,43 @@ private:
         }
 
         if (kind == CXCursor_CallExpr) {
+            // Сборка программы шейдера: первый аргумент - переменная-структура, дальше имена шейдеров и define строками
+            int argumentsCount = clang_Cursor_getNumArguments(cursor);
+            if (argumentsCount >= 2 && !parser->shared.shaders->fileByName.empty()) {
+                std::string programId = recordVariableId(clang_Cursor_getArgument(cursor, 0));
+                if (!programId.empty()) {
+                    struct LiteralCollect {
+                        const ShaderCatalog *shaders;
+                        FunctionVisit *function;
+                        PendingShaderUse use;
+                    } collect{parser->shared.shaders, function, PendingShaderUse{function->functionId, {}, {}, programId}};
+                    for (int argumentIndex = 1; argumentIndex < argumentsCount; ++argumentIndex) {
+                        clang_visitChildren(clang_Cursor_getArgument(cursor, argumentIndex), [](CXCursor child, CXCursor, CXClientData data) {
+                            LiteralCollect *collect = static_cast<LiteralCollect*>(data);
+                            if (clang_getCursorKind(child) != CXCursor_StringLiteral)
+                                return CXChildVisit_Recurse;
+                            std::string text = literalText(child);
+                            if (collect->shaders->fileByName.count(text) > 0) {
+                                collect->use.shaderNames.push_back(text);
+                                collect->function->shaderLiterals.insert(clang_hashCursor(child));
+                            }
+                            size_t definePosition = 0;
+                            while ((definePosition = text.find("#define", definePosition)) != std::string::npos) {
+                                definePosition += 7;
+                                size_t nameStart = text.find_first_not_of(" \t", definePosition);
+                                size_t nameEnd = nameStart == std::string::npos ? nameStart : text.find_first_not_of(
+                                    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_", nameStart);
+                                if (nameStart != std::string::npos)
+                                    collect->use.defines.insert(text.substr(nameStart, nameEnd == std::string::npos ? std::string::npos : nameEnd - nameStart));
+                            }
+                            return CXChildVisit_Continue;
+                        }, &collect);
+                    }
+                    if (!collect.use.shaderNames.empty())
+                        parser->result.shaderUses.push_back(collect.use);
+                }
+            }
+
             CXCursor callee = clang_getCursorReferenced(cursor);
             if (clang_Cursor_isNull(callee))
                 return CXChildVisit_Recurse;
@@ -484,6 +591,21 @@ private:
             return CXChildVisit_Recurse;
         }
 
+        // Имя шейдера строкой вне сборки программы
+        if (kind == CXCursor_StringLiteral) {
+            std::string text = literalText(cursor);
+            if (parser->shared.shaders->fileByName.count(text) > 0 && function->shaderLiterals.count(clang_hashCursor(cursor)) == 0)
+                parser->result.shaderUses.push_back(PendingShaderUse{function->functionId, {text}, {}, std::string()});
+            return CXChildVisit_Continue;
+        }
+
+        // Обращение к полю или переменной-структуре: вдруг это программа шейдера (связь - после всех единиц)
+        if ((kind == CXCursor_MemberRefExpr || kind == CXCursor_DeclRefExpr) && !parser->shared.shaders->fileByName.empty()) {
+            CXCursor variable = clang_getCursorReferenced(cursor);
+            if (isRecordVariable(variable))
+                function->variableIds.insert(takeString(clang_getCursorUSR(variable)));
+        }
+
         // Обращение к полю типа проекта: чтение, в левой части присваивания - запись
         if (kind == CXCursor_MemberRefExpr) {
             CXCursor member = clang_getCursorReferenced(cursor);
@@ -500,6 +622,227 @@ private:
         return CXChildVisit_Recurse;
     }
 };
+
+
+// Шейдеры проекта: файлы с расширениями шейдеров из папок шейдеров шаблона (нет - весь проект без исключённых, скрытых и папок
+// сборки), разобранные; имена из файлов имён (.rc), пути от корня и имена файлов
+ShaderCatalog collectShaders(const ProjectTemplate &project) {
+    ShaderCatalog catalog;
+    std::filesystem::path root(project.root);
+    std::error_code errorCode;
+    std::set<std::string> extensions;
+    for (const std::string &extension : project.shaderExtensions) {
+        std::string lowered = extension;
+        std::transform(lowered.begin(), lowered.end(), lowered.begin(), ::tolower);
+        extensions.insert("." + lowered);
+    }
+
+    std::vector<std::filesystem::path> folders;
+    for (const std::wstring &folder : project.shaderDirs)
+        folders.push_back(root / folder);
+    if (folders.empty())
+        folders.push_back(root);
+    for (const std::filesystem::path &folder : folders) {
+        if (!std::filesystem::is_directory(folder, errorCode))
+            continue;
+        for (auto entry = std::filesystem::recursive_directory_iterator(folder, std::filesystem::directory_options::skip_permission_denied, errorCode);
+             entry != std::filesystem::recursive_directory_iterator(); entry.increment(errorCode)) {
+            if (errorCode)
+                break;
+            std::filesystem::path path = entry->path();
+            if (entry->is_directory(errorCode)) {
+                // Скрытые папки, папки сборки и (без папок шейдеров в шаблоне) исключённые - мимо
+                bool isSkipped = path.filename().string().rfind('.', 0) == 0 || std::filesystem::exists(path / "CMakeCache.txt", errorCode) ||
+                                 (project.shaderDirs.empty() && project.projectRelativePath(path.wstring()).empty());
+                if (isSkipped)
+                    entry.disable_recursion_pending();
+                continue;
+            }
+            std::string extension = path.extension().string();
+            std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
+            if (extensions.count(extension) == 0)
+                continue;
+            ShaderFile file;
+            if (!ShaderParser::parse(path, file))
+                continue;
+            std::wstring relative = path.lexically_normal().lexically_relative(root).generic_wstring();
+            catalog.files[relative] = file;
+            catalog.fileByName[wstringToString(relative)] = relative;
+            catalog.fileByName.emplace(path.filename().string(), relative);
+        }
+    }
+    if (catalog.files.empty())
+        return catalog;
+
+    // Файлы имён: строки «ИМЯ ТИП "путь"» (как IDR_Frame RCDATA "Shaders/Common/Frame.glsl" в .rc), путь - от папки файла имён
+    std::vector<std::filesystem::path> nameFiles;
+    for (const std::wstring &nameFile : project.shaderNameFiles)
+        nameFiles.push_back(root / nameFile);
+    if (nameFiles.empty()) {
+        for (const auto &entry : std::filesystem::directory_iterator(root, errorCode)) {
+            std::string extension = entry.path().extension().string();
+            std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
+            if (extension == ".rc")
+                nameFiles.push_back(entry.path());
+        }
+    }
+    std::regex namePattern(R"pattern(^\s*([A-Za-z_]\w*)\s+\w+\s+"([^"]+)")pattern");
+    for (const std::filesystem::path &nameFile : nameFiles) {
+        std::ifstream stream(nameFile, std::ios::binary);
+        std::string line;
+        while (std::getline(stream, line)) {
+            std::smatch match;
+            if (!std::regex_search(line, match, namePattern))
+                continue;
+            std::string pathText = match[2].str();
+            std::replace(pathText.begin(), pathText.end(), '\\', '/');
+            std::wstring relative = (nameFile.parent_path() / std::filesystem::u8path(pathText)).lexically_normal().lexically_relative(root).generic_wstring();
+            if (catalog.files.count(relative) > 0)
+                catalog.fileByName[match[1].str()] = relative;
+        }
+    }
+    return catalog;
+}
+
+// Узлы функций шейдеров и связи: вызовы внутри шейдеров (по подключениям), из C++ - к main шейдера (с подходящими define):
+// из функции, где шейдер собирается или назван, и из функций, которые обращаются к переменной его программы
+void addShaders(const ShaderCatalog &catalog, const std::vector<WorkerResult> &results, Graph &graph) {
+    if (catalog.files.empty())
+        return;
+
+    // Узлы: у одноимённых функций файла (main проходов, ветки #if) - ветка в имени
+    std::map<std::wstring, std::vector<int>> nodesOfFile;
+    std::map<int, const ShaderFunction*> functionOfNode;
+    for (const auto &[file, shader] : catalog.files) {
+        std::map<std::string, int> namesCount;
+        for (const ShaderFunction &function : shader.functions)
+            ++namesCount[function.name];
+        std::map<std::string, int> idsCount;
+        for (const ShaderFunction &function : shader.functions) {
+            std::string label = function.branches.empty() ? std::string() : function.branches.back().label;
+            bool isLabeled = namesCount[function.name] > 1 && !label.empty();
+            std::string id = "glsl:" + wstringToString(file) + ":" + function.name + (isLabeled ? "@" + label : std::string());
+            int duplicate = idsCount[id]++;
+            if (duplicate > 0)
+                id += "#" + std::to_string(duplicate + 1);
+
+            GraphNode node;
+            node.id = id;
+            node.kind = NodeKind::Function;
+            node.name = stringToWString(function.name + (isLabeled ? " [" + label + "]" : std::string()));
+            node.qualifiedName = node.name;
+            node.signature = stringToWString(function.signature);
+            node.file = file;
+            node.line = function.line;
+            node.comment = stringToWString(function.comment);
+            node.bodyHash = function.bodyHash;
+            int nodeIndex = graph.addNode(node);
+            nodesOfFile[file].push_back(nodeIndex);
+            functionOfNode[nodeIndex] = &function;
+        }
+    }
+
+    // Подключения файла с вложенными (по имени из файла имён, пути или от папки файла)
+    auto resolveInclude = [&](const std::wstring &file, const std::string &include) {
+        auto byName = catalog.fileByName.find(include);
+        if (byName != catalog.fileByName.end())
+            return byName->second;
+        std::wstring relative = (std::filesystem::path(file).parent_path() / std::filesystem::u8path(include)).lexically_normal().generic_wstring();
+        return catalog.files.count(relative) > 0 ? relative : std::wstring();
+    };
+    std::map<std::wstring, std::vector<std::wstring>> scopeOfFile;
+    for (const auto &[file, shader] : catalog.files) {
+        std::vector<std::wstring> scope{file};
+        std::set<std::wstring> seen{file};
+        for (size_t i = 0; i < scope.size(); ++i) {
+            for (const std::string &include : catalog.files.at(scope[i]).includes) {
+                std::wstring included = resolveInclude(scope[i], include);
+                if (!included.empty() && seen.insert(included).second)
+                    scope.push_back(included);
+            }
+        }
+        scopeOfFile[file] = scope;
+    }
+
+    // Вызовы в шейдерах: одноимённые в своём файле, потом в подключённых; из нескольких - собираемые при define ветки вызывающей
+    for (const auto &[file, nodes] : nodesOfFile) {
+        for (int callerIndex : nodes) {
+            const ShaderFunction &caller = *functionOfNode[callerIndex];
+            std::set<std::string> callerDefines;
+            for (const ShaderBranch &branch : caller.branches) {
+                if (!branch.isElse && !branch.condition.isNegated)
+                    callerDefines.insert(branch.condition.macros.begin(), branch.condition.macros.end());
+            }
+            int order = 0;
+            for (const std::string &calledName : caller.calledNames) {
+                std::vector<int> candidates;
+                for (const std::wstring &scopeFile : scopeOfFile[file]) {
+                    for (int candidateIndex : nodesOfFile[scopeFile]) {
+                        if (functionOfNode[candidateIndex]->name == calledName)
+                            candidates.push_back(candidateIndex);
+                    }
+                    if (!candidates.empty())
+                        break;
+                }
+                std::vector<int> compiled;
+                for (int candidateIndex : candidates) {
+                    if (ShaderParser::isCompiled(functionOfNode[candidateIndex]->branches, callerDefines))
+                        compiled.push_back(candidateIndex);
+                }
+                bool isCounted = false;
+                for (int calleeIndex : compiled.empty() ? candidates : compiled) {
+                    if (calleeIndex != callerIndex) {
+                        graph.addEdge(callerIndex, calleeIndex, EdgeKind::Call, order + 1);
+                        isCounted = true;
+                    }
+                }
+                if (isCounted)
+                    ++order;
+            }
+        }
+    }
+
+    // main шейдера по имени из C++ при заданных define (нет подходящих - все main файла)
+    auto mainsOf = [&](const std::string &shaderName, const std::set<std::string> &defines) {
+        std::vector<int> all, compiled;
+        auto found = catalog.fileByName.find(shaderName);
+        if (found == catalog.fileByName.end())
+            return all;
+        for (int nodeIndex : nodesOfFile[found->second]) {
+            const ShaderFunction &function = *functionOfNode[nodeIndex];
+            if (function.name != "main")
+                continue;
+            all.push_back(nodeIndex);
+            if (ShaderParser::isCompiled(function.branches, defines))
+                compiled.push_back(nodeIndex);
+        }
+        return compiled.empty() ? all : compiled;
+    };
+    std::map<std::string, std::set<int>> mainsOfProgram;
+    for (const WorkerResult &result : results) {
+        for (const PendingShaderUse &use : result.shaderUses) {
+            int from = graph.findNode(use.functionId);
+            for (const std::string &shaderName : use.shaderNames) {
+                for (int mainIndex : mainsOf(shaderName, use.defines)) {
+                    if (from >= 0)
+                        graph.addEdge(from, mainIndex, EdgeKind::Call, 0);
+                    if (!use.programId.empty())
+                        mainsOfProgram[use.programId].insert(mainIndex);
+                }
+            }
+        }
+    }
+    for (const WorkerResult &result : results) {
+        for (const PendingVariableUse &use : result.variableUses) {
+            auto program = mainsOfProgram.find(use.variableId);
+            int from = program == mainsOfProgram.end() ? -1 : graph.findNode(use.functionId);
+            if (from < 0)
+                continue;
+            for (int mainIndex : program->second)
+                graph.addEdge(from, mainIndex, EdgeKind::Call, 0);
+        }
+    }
+}
 
 
 } // namespace
@@ -700,8 +1043,13 @@ bool Analyzer::scan(const ProjectTemplate &project, Graph &graph, std::wstring &
         Debug() << "Флаги первой единицы:" << units[0].file << arguments;
     }
 
+    // Шейдеры разбираются сразу: их имена нужны потокам, чтобы узнавать имена шейдеров строками в C++
+    ShaderCatalog shaders = collectShaders(project);
+    Debug() << "Шейдеров:" << shaders.files.size() << ", имён:" << shaders.fileByName.size();
+
     // Разбор в потоках: каждый со своим CXIndex, результаты сливаются после
     SharedScan shared;
+    shared.shaders = &shaders;
     shared.project = &project;
     shared.componentCalls = std::set<std::string>(project.componentCalls.begin(), project.componentCalls.end());
     shared.writeCalls = std::set<std::string>(project.writeCalls.begin(), project.writeCalls.end());
@@ -784,6 +1132,7 @@ bool Analyzer::scan(const ProjectTemplate &project, Graph &graph, std::wstring &
                 graph.addEdge(type, function, EdgeKind::Read, 0);
         }
     }
+    addShaders(shaders, results, graph);
     Debug() << "Граф:" << graph.nodes.size() << "узлов," << graph.edges.size() << "связей, единиц с ошибками разбора:" << int(unitsWithErrors);
     return true;
 }
