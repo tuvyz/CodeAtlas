@@ -126,6 +126,18 @@ double Layout::frameTitleWidth(const std::wstring &file) {
 }
 
 
+// Высота имени папки глубины depth (1 - верхний уровень, вложенные мельче)
+double Layout::folderTitleSizeAt(int depth) {
+    return folderTitleSize() * (depth <= 1 ? 1.0 : depth == 2 ? 0.82 : 0.68);
+}
+
+// Наименьшая ширина области папки глубины depth: имя папки (последняя часть пути) целиком с отступами
+double Layout::folderTitleWidth(const std::wstring &path, int depth) {
+    size_t slash = path.rfind(L'/');
+    size_t nameLength = slash == std::wstring::npos ? path.size() : path.size() - slash - 1;
+    return double(nameLength) * folderTitleSizeAt(depth) * 0.6 + 18 + folderPadding;
+}
+
 // Сетка файла: места блоков от левого верхнего угла рамки и размер рамки. Блоки разного размера идут полками слева направо
 // (типы сверху, дальше по строкам определения), ширина полки - под рамку примерно вдвое шире высоты
 std::vector<std::pair<int, glm::dvec2>> Layout::fileGrid(const Graph &graph, std::vector<int> nodes, glm::dvec2 &frameSize) {
@@ -191,20 +203,29 @@ glm::dvec2 Layout::packFiles(const Graph &graph, const std::map<std::wstring, st
     struct Folder {
         std::map<std::wstring, Folder> children;
         std::vector<std::wstring> files;
+        std::wstring name;
+        int depth = 0;               // Глубина от корня проекта (0 - корень упаковки)
         glm::dvec2 size{0, 0};
         std::vector<std::pair<Folder*, glm::dvec2>> folderOffsets;
         std::vector<std::pair<std::wstring, glm::dvec2>> fileOffsets;
     };
 
     Folder root;
+    int baseDepth = 0;
+    for (const std::filesystem::path &part : std::filesystem::path(base))
+        baseDepth += part.empty() ? 0 : 1;
     for (const std::wstring &file : files) {
         Folder *folder = &root;
         std::filesystem::path parent = std::filesystem::path(file).parent_path();
         if (!base.empty())
             parent = parent.lexically_relative(std::filesystem::path(base));
         for (const std::filesystem::path &part : parent) {
-            if (part != ".")
-                folder = &folder->children[part.wstring()];
+            if (part == ".")
+                continue;
+            int depth = folder->depth + 1;
+            folder = &folder->children[part.wstring()];
+            folder->name = part.wstring();
+            folder->depth = depth;
         }
         folder->files.push_back(file);
     }
@@ -252,6 +273,10 @@ glm::dvec2 Layout::packFiles(const Graph &graph, const std::map<std::wstring, st
             contentWidth = std::max(contentWidth, cursor.x - frameGap - inset);
         }
         folder.size = glm::dvec2(contentWidth + 2 * inset, cursor.y + rowHeight + inset);
+        // Область папки (рисуемой глубины) не уже своего имени
+        int projectDepth = baseDepth + folder.depth;
+        if (!isRoot && projectDepth <= maxFolderDepth)
+            folder.size.x = std::max(folder.size.x, folderTitleWidth(folder.name, projectDepth));
     };
     pack(pack, root, true);
 
@@ -584,6 +609,7 @@ int Layout::separate(const Graph &graph, const std::set<std::string> &pinnedIds)
         }
         areaRects[folder] = LayoutRect{minimum - glm::dvec2(folderPadding, folderPadding + folderHeaderHeight()),
                                        maximum - minimum + glm::dvec2(2 * folderPadding, 2 * folderPadding + folderHeaderHeight())};
+        areaRects[folder].size.x = std::max(areaRects[folder].size.x, folderTitleWidth(folder, depthOf(folder)));
     }
     return movedCount;
 }

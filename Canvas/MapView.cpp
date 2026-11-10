@@ -150,6 +150,7 @@ void MapView::rebuildGeometry() {
         area.colorIndex = areaColors[path];
         area.rect = LayoutRect{raw.position - glm::dvec2(Layout::folderPadding, Layout::folderPadding + Layout::folderHeaderHeight()),
                                raw.size + glm::dvec2(2 * Layout::folderPadding, 2 * Layout::folderPadding + Layout::folderHeaderHeight())};
+        area.rect.size.x = std::max(area.rect.size.x, Layout::folderTitleWidth(path, area.depth));
         folders.push_back(area);
         size_t slash = path.rfind(L'/');
         if (slash != std::wstring::npos)
@@ -282,7 +283,7 @@ void MapView::buildScene() {
         glm::vec4 fill = glm::mix(paperColor, accent, 0.06f + 0.035f * (area.depth - 1));
         glm::vec4 border = glm::mix(paperColor, accent, 0.32f);
         areaLayer.shapes.push_back(boxShape(area.rect, ShapeKind::RoundBox, 16, fill, border, 1));
-        float titleSize = float(Layout::folderTitleSize()) * (area.depth == 1 ? 1.0f : area.depth == 2 ? 0.82f : 0.68f);
+        float titleSize = float(Layout::folderTitleSizeAt(area.depth));
         glm::vec2 titlePosition = glm::vec2(area.rect.position) + glm::vec2(18, float(Layout::folderHeaderHeight()) * 0.5f + 2);
         font.addText(areaLayer, lastPathPart(area.path), titlePosition, titleSize, glm::mix(accent, glm::vec4(0, 0, 0, 1), 0.28f));
     }

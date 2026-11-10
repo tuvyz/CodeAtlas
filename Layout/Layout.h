@@ -95,6 +95,10 @@ public:
 
     // Наименьшая ширина рамки файла: имя файла целиком (моноширинный шрифт, знак - 0.6 высоты)
     static double frameTitleWidth(const std::wstring &file);
+    // Высота имени папки глубины depth (1 - верхний уровень, вложенные мельче)
+    static double folderTitleSizeAt(int depth);
+    // Наименьшая ширина области папки глубины depth: имя папки (последняя часть пути) целиком с отступами
+    static double folderTitleWidth(const std::wstring &path, int depth);
 
 private:
     // Блок, рамка или область при раздвигании: место, закреплено ли, узлы под ним, итоговый сдвиг
