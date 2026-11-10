@@ -78,6 +78,9 @@ public:
 
     GLuint texture() const {return atlasTexture;}
 
+    // Пересчитать мип-уровни атласа, если в него добавились знаки (перед рисованием текста)
+    void updateMipmaps();
+
 private:
     // Знак в атласе: место (uv), размер и смещение от точки пера, продвижение - в пикселях базового размера
     struct Glyph {
@@ -89,6 +92,8 @@ private:
 
     static constexpr int basePixelSize = 40; // Размер растеризации знаков
     static constexpr int atlasSize = 2048;
+    static constexpr int glyphGap = 8;       // Зазор между знаками в атласе, пиксели: мип-уровни до третьего не смешивают соседние знаки
+    static constexpr int maxMipLevel = 3;    // Последний мип-уровень атласа (знак 5 пикселей); дальше соседние знаки сливаются
 
     FT_Library library = nullptr;
     FT_Face face = nullptr;
@@ -97,6 +102,7 @@ private:
     glm::ivec2 shelfCursor{1, 1}; // Свободное место на текущей полке атласа
     int shelfHeight = 0;
     float capHeight = 28;         // Высота прописных, пиксели базового размера
+    bool isMipmapDirty = false;   // В атлас добавились знаки, мип-уровни устарели
 
     // Знак (растеризуется при первом обращении)
     const Glyph &glyph(wchar_t character);

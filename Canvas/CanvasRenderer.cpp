@@ -21,8 +21,10 @@ bool SdfFont::load(const std::string &path) {
     std::vector<unsigned char> empty(size_t(atlasSize) * atlasSize, 0);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, atlasSize, atlasSize, 0, GL_RED, GL_UNSIGNED_BYTE, empty.data());
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, maxMipLevel);
+    isMipmapDirty = true;
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
@@ -30,6 +32,15 @@ bool SdfFont::load(const std::string &path) {
     if (FT_Load_Char(face, L'H', FT_LOAD_DEFAULT) == 0)
         capHeight = float(face->glyph->metrics.horiBearingY >> 6);
     return true;
+}
+
+// Пересчитать мип-уровни атласа, если в него добавились знаки (перед рисованием текста)
+void SdfFont::updateMipmaps() {
+    if (!isMipmapDirty || atlasTexture == 0)
+        return;
+    isMipmapDirty = false;
+    glBindTexture(GL_TEXTURE_2D, atlasTexture);
+    glGenerateMipmap(GL_TEXTURE_2D);
 }
 
 // Знак (растеризуется при первом обращении)
@@ -51,12 +62,12 @@ const SdfFont::Glyph &SdfFont::glyph(wchar_t character) {
     if (width == 0 || height == 0)
         return result;
 
-    // Место на полке атласа; полный атлас - знак без картинки
-    if (shelfCursor.x + width + 1 > atlasSize) {
-        shelfCursor = glm::ivec2(1, shelfCursor.y + shelfHeight + 1);
+    // Место на полке атласа с зазором под мип-уровни; полный атлас - знак без картинки
+    if (shelfCursor.x + width + glyphGap > atlasSize) {
+        shelfCursor = glm::ivec2(glyphGap, shelfCursor.y + shelfHeight + glyphGap);
         shelfHeight = 0;
     }
-    if (shelfCursor.y + height + 1 > atlasSize)
+    if (shelfCursor.y + height + glyphGap > atlasSize)
         return result;
 
     std::vector<unsigned char> pixels(size_t(width) * height);
@@ -70,8 +81,9 @@ const SdfFont::Glyph &SdfFont::glyph(wchar_t character) {
                           float(shelfCursor.y + height) / atlasSize);
     result.size = glm::vec2(width, height);
     result.bearing = glm::vec2(face->glyph->bitmap_left, face->glyph->bitmap_top);
-    shelfCursor.x += width + 1;
+    shelfCursor.x += width + glyphGap;
     shelfHeight = std::max(shelfHeight, height);
+    isMipmapDirty = true;
     return result;
 }
 
@@ -263,10 +275,32 @@ flat in float isScreenText;
 uniform sampler2D atlas;
 out vec4 outColor;
 
+// Покрытие пикселя буквой. Мельче атласа (пиксель накрывает несколько его точек) - 4 выборки на пиксель с мип-уровнем на полпикселя:
+// одна выборка проскакивает тонкие штрихи. Совсем мелкий текст чуть толще (порог ниже 0.5), как хинтинг шрифтов, чтобы штрихи не бледнели
+float glyphCoverage(vec2 point, vec2 dx, vec2 dy, float width, float threshold) {
+    float distance = textureGrad(atlas, point, dx, dy).r;
+    return smoothstep(threshold - width, threshold + width, distance);
+}
+
 void main() {
+    vec2 dx = dFdx(uv);
+    vec2 dy = dFdy(uv);
+    float texelsPerPixel = max(length(dx), length(dy)) * float(textureSize(atlas, 0).x);
     float distance = texture(atlas, uv).r;
     float width = max(fwidth(distance) * 0.7, 0.01);
-    float alpha = smoothstep(0.5 - width, 0.5 + width, distance);
+    float threshold = 0.5 - clamp((texelsPerPixel - 2.0) * 0.02, 0.0, 0.06);
+    float alpha;
+    if (texelsPerPixel > 1.0) {
+        vec2 halfDx = dx * 0.5;
+        vec2 halfDy = dy * 0.5;
+        float halfWidth = max(width * 0.5, 0.01);
+        alpha = 0.25 * (glyphCoverage(uv - 0.5 * halfDx - 0.5 * halfDy, halfDx, halfDy, halfWidth, threshold) +
+                        glyphCoverage(uv + 0.5 * halfDx - 0.5 * halfDy, halfDx, halfDy, halfWidth, threshold) +
+                        glyphCoverage(uv - 0.5 * halfDx + 0.5 * halfDy, halfDx, halfDy, halfWidth, threshold) +
+                        glyphCoverage(uv + 0.5 * halfDx + 0.5 * halfDy, halfDx, halfDy, halfWidth, threshold));
+    } else {
+        alpha = smoothstep(threshold - width, threshold + width, distance);
+    }
     outColor = vec4(glyphColor.rgb, glyphColor.a * alpha);
 
     // Подписи дальнего вида лежат поверх блоков: светлый ореол вокруг букв, чтобы читались
@@ -448,6 +482,7 @@ void CanvasRenderer::render(const std::vector<CanvasLayer*> &layers, glm::ivec2 
         if (!layer->glyphs.empty()) {
             setCamera(glyphProgram);
             glActiveTexture(GL_TEXTURE0);
+            font.updateMipmaps();
             glBindTexture(GL_TEXTURE_2D, font.texture());
             glUniform1i(glGetUniformLocation(glyphProgram, "atlas"), 0);
             glBindVertexArray(buffers.glyphVao);
