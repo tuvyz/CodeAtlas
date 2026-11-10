@@ -911,8 +911,8 @@ int64_t fileWriteTime(const std::filesystem::path &path) {
 bool loadUnits(const ProjectTemplate &project, std::vector<Unit> &units, std::filesystem::path &compileCommandsPath, std::wstring &error) {
     std::filesystem::path compileDir = Analyzer::findCompileCommandsDir(project);
     if (compileDir.empty()) {
-        error = L"Не найден compile_commands.json: в CMakeLists.txt проекта set(CMAKE_EXPORT_COMPILE_COMMANDS ON), генератор Ninja, пересобрать; "
-                L"файл указать кнопкой «Открыть»";
+        error = L"Не найден compile_commands.json: открыть проект в Qt Creator (он пишет его в папку сборки, в .qtc_clangd) или "
+                L"в CMakeLists.txt set(CMAKE_EXPORT_COMPILE_COMMANDS ON); лежит не рядом с проектом - указать кнопкой «Открыть»";
         return false;
     }
     compileCommandsPath = compileDir / "compile_commands.json";
@@ -1156,14 +1156,16 @@ std::filesystem::path Analyzer::findCompileCommandsDir(const ProjectTemplate &pr
             return folder;
     }
 
-    // Иначе самый свежий: в папках проекта до трёх уровней (кроме скрытых) и в соседних папках сборки Qt Creator вида build-<проект>-<комплект>
+    // Иначе самый свежий: в папках проекта до трёх уровней (кроме скрытых) и в соседних папках сборки Qt Creator вида build-<проект>-<комплект>.
+    // Из скрытых - .qtc_clangd: туда Qt Creator сам пишет compile_commands.json для своей модели кода (у любого открытого в нём проекта, и qmake тоже)
     std::filesystem::path newest;
     std::filesystem::file_time_type newestTime;
     auto searchIn = [&](const std::filesystem::path &start) {
         std::error_code searchError;
         std::filesystem::recursive_directory_iterator iterator(start, std::filesystem::directory_options::skip_permission_denied, searchError);
         for (; !searchError && iterator != std::filesystem::recursive_directory_iterator(); iterator.increment(searchError)) {
-            if (iterator.depth() >= 3 || iterator->path().filename().wstring().rfind(L'.', 0) == 0) {
+            std::wstring name = iterator->path().filename().wstring();
+            if (iterator.depth() >= 3 || (name.rfind(L'.', 0) == 0 && name != L".qtc_clangd")) {
                 iterator.disable_recursion_pending();
                 continue;
             }

@@ -52,7 +52,7 @@ cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Release && ninja -C build
 
 Запуск: `CodeAtlas [папка проекта]` (без папки - последний открытый проект). Сканирование без окна: `CodeAtlas --scan <папка проекта> [--out <файл графа>]`.
 
-Анализируемому проекту нужен compile_commands.json - список файлов с флагами сборки. Его пишет CMake: в CMakeLists.txt проекта `set(CMAKE_EXPORT_COMPILE_COMMANDS ON)`, генератор Ninja или Makefile (в Qt Creator по умолчанию Ninja), пересобрать. CodeAtlas ищет его сам: папка `compile_commands` из codeatlas.yaml (по умолчанию `build`), папки проекта до трёх уровней и соседние папки сборки Qt Creator вида `build-<проект>-...`. Не нашёл - указать файл кнопкой «Открыть», выбор запоминается.
+Анализируемому проекту нужен compile_commands.json - список файлов с флагами сборки. Его пишет CMake: в CMakeLists.txt проекта `set(CMAKE_EXPORT_COMPILE_COMMANDS ON)`, генератор Ninja или Makefile (в Qt Creator по умолчанию Ninja), пересобрать. CodeAtlas ищет его сам: папка `compile_commands` из codeatlas.yaml (по умолчанию `build`), папки проекта до трёх уровней и соседние папки сборки Qt Creator вида `build-<проект>-...`, в том числе `.qtc_clangd` в них - туда Qt Creator сам пишет compile_commands.json для своей модели кода у любого открытого проекта (и qmake тоже), так что проекту, открытому в Qt Creator, ничего настраивать не надо. Не нашёл - указать файл кнопкой «Открыть», выбор запоминается.
 
 ## Где данные
 
