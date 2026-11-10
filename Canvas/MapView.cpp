@@ -271,12 +271,15 @@ void MapView::buildScene() {
         float labelSize = area.depth == 1 ? 22.0f : area.depth == 2 ? 18.0f : 15.0f;
         float screenSize = area.depth == 1 ? 17.0f : area.depth == 2 ? 15.0f : 13.0f;
         float switchZoom = screenSize / labelSize;
-        float appearZoom = area.depth == 1 ? 0.0f : area.depth == 2 ? 0.3f : 0.36f;
+        // Издали имя появляется, только когда область на экране шире его (иначе имена соседних папок налезают друг на друга)
         glm::vec2 labelPosition = glm::vec2(area.rect.position) + glm::vec2(18, Layout::folderHeaderHeight * 0.5f + 2);
         std::wstring name = lastPathPart(area.path);
+        float depthAppearZoom = area.depth == 1 ? 0.0f : area.depth == 2 ? 0.3f : 0.36f;
+        float appearZoom = std::max(depthAppearZoom, (font.measure(name, screenSize) + 24) / float(area.rect.size.x));
         font.addText(areaLayer, name, labelPosition, labelSize, label, glm::vec2(switchZoom, 0), float(area.rect.size.x) - 36);
-        font.addText(overlayLayer, name, glm::vec2(area.rect.position) + glm::vec2(10, 12), screenSize, label, glm::vec2(appearZoom, switchZoom * 0.75f),
-                     area.depth == 1 ? 0.0f : std::max(40.0f, float(area.rect.size.x) * appearZoom - 12), true);
+        if (appearZoom < switchZoom * 0.75f)
+            font.addText(overlayLayer, name, glm::vec2(area.rect.position) + glm::vec2(10, 12), screenSize, label, glm::vec2(appearZoom, switchZoom * 0.75f),
+                         0, true);
     }
 
     // Рамки файлов с тенью; имя файла в полосе сверху, крупное - для дальнего вида
