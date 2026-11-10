@@ -66,7 +66,7 @@ public:
 
     // Во сколько раз блок узла больше обычного (вместе с именем): у функции - по числу строк, как задано в настройках, у остальных - 1
     static double nodeScale(const GraphNode &node);
-    // Размер блока узла
+    // Размер блока узла: ширина - под имя целиком (не уже наименьшей)
     static glm::dvec2 nodeSize(const GraphNode &node);
     // Размер пометки
     static glm::dvec2 noteSize(const LayoutNote &note);

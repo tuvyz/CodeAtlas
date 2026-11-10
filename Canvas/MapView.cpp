@@ -406,8 +406,7 @@ void MapView::buildScene() {
         // Имя посередине; у крупного блока - выше середины, под ним мелко число строк
         float textSize = float(Layout::nodeTextSize()) * scale;
         float nameMiddle = float(rect.size.y) * (scale > 1 ? 0.4f : 0.5f);
-        font.addText(nodeLayer, node.name, glm::vec2(rect.position) + glm::vec2(textLeft, nameMiddle), textSize, text, glm::vec2(0, 0),
-                     float(rect.size.x) - textLeft - 8 * scale);
+        font.addText(nodeLayer, node.name, glm::vec2(rect.position) + glm::vec2(textLeft, nameMiddle), textSize, text);
         if (scale > 1) {
             int lastDigit = node.lineCount % 10;
             int lastTwoDigits = node.lineCount % 100;
@@ -430,7 +429,7 @@ void MapView::buildScene() {
             nodeLayer.shapes.push_back(boxShape(rect, ShapeKind::DashedBox, 6, hexColor(0xF4F2ED, 0.6f), hexColor(0xB04848), 1.4f));
             float scale = float(Layout::nodeScale(node));
             font.addText(nodeLayer, node.name, glm::vec2(rect.position) + glm::vec2(12 * scale, float(rect.size.y) * 0.5f), float(Layout::nodeTextSize()) * scale,
-                         hexColor(0xA05A5A), glm::vec2(0, 0), float(rect.size.x) - 20 * scale);
+                         hexColor(0xA05A5A));
         }
     }
 

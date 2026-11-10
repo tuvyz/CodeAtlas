@@ -17,10 +17,10 @@ double Layout::nodeScale(const GraphNode &node) {
     return std::min(1.5 + 0.5 * std::floor(std::log(lines / step) / std::log(3.0) + 1e-9), maxLogScale);
 }
 
-// Размер блока узла
+// Размер блока узла: ширина - под имя целиком (не уже наименьшей)
 glm::dvec2 Layout::nodeSize(const GraphNode &node) {
     double width = double(node.name.size()) * nodeCharWidth() + nodeTextSize() * 2.3;
-    return glm::dvec2(std::clamp(width, nodeTextSize() * 8.5, nodeTextSize() * 26), nodeHeight()) * nodeScale(node);
+    return glm::dvec2(std::max(width, nodeTextSize() * 8.5), nodeHeight()) * nodeScale(node);
 }
 
 // Размер пометки

@@ -89,8 +89,16 @@ std::vector<std::wstring> wrapText(const std::wstring &text, int charsPerLine) {
                     lines.push_back(line);
                     line.clear();
                 }
-                lines.push_back(word.substr(0, charsPerLine));
-                word = word.substr(charsPerLine);
+                // Длинное имя рвётся после :: или _, если такие есть в строке, иначе по ширине
+                size_t cut = charsPerLine;
+                size_t scope = word.rfind(L"::", charsPerLine - 2);
+                size_t underscore = word.rfind(L'_', charsPerLine - 1);
+                if (scope != std::wstring::npos && scope > 0)
+                    cut = scope + 2;
+                else if (underscore != std::wstring::npos && underscore > 0)
+                    cut = underscore + 1;
+                lines.push_back(word.substr(0, cut));
+                word = word.substr(cut);
             }
             if (!line.empty() && int(line.size() + 1 + word.size()) > charsPerLine) {
                 lines.push_back(line);
