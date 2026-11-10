@@ -106,8 +106,8 @@ bool Console::handleEvent(const SDL_Event& event) {
 
 // Установка команды в поле ввода
 void Console::setCommandHistory() {
-    currentCommandId = std::max<int>(-1, currentCommandId);
-    currentCommandId = std::min<int>(commandHistory.size() - 1, currentCommandId);
+    currentCommandId = (std::max<int>)(-1, currentCommandId);
+    currentCommandId = (std::min<int>)(commandHistory.size() - 1, currentCommandId);
     if (currentCommandId == -1)
         clear();
     else

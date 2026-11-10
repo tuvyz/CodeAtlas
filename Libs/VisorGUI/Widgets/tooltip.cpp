@@ -54,7 +54,7 @@ void ToolTip::layoutLines() {
     std::wstring line;
     size_t wordStart = 0;
     while (wordStart <= contextText.size()) {
-        size_t wordEnd = std::min(contextText.find(L' ', wordStart), contextText.size());
+        size_t wordEnd = (std::min)(contextText.find(L' ', wordStart), contextText.size());
         std::wstring word = contextText.substr(wordStart, wordEnd - wordStart);
         std::wstring extended = line.empty() ? word : line + L' ' + word;
         if (!line.empty() && guiContext->textRenderer.calculateTextSize(extended, fontSize).width > maxLineWidth) {
@@ -70,7 +70,7 @@ void ToolTip::layoutLines() {
 
     int textWidth = 0;
     for (std::wstring &textLine : lines)
-        textWidth = std::max(textWidth, guiContext->textRenderer.calculateTextSize(textLine, fontSize).width);
+        textWidth = (std::max)(textWidth, guiContext->textRenderer.calculateTextSize(textLine, fontSize).width);
     setStandardWidgetSize(MySize<double>(textWidth + extraPaddingContextText.x, double(lines.size()) * fontSize * lineSpacing + extraPaddingContextText.y));
 }
 

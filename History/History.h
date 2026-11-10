@@ -12,9 +12,6 @@
 #include "Graph/Graph.h"
 #include "Global/Strings.h"
 #include "Global/Logging_Fmt.h"
-#ifdef _WIN32
-#include <windows.h>
-#endif
 
 
 // Снимок графа: каким был код на коммите (с правками поверх, если были)

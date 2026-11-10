@@ -28,7 +28,7 @@ void SpoilerHeader::updateTexture() {
     
     // Треугольник: свёрнут - смотрит вправо, раскрыт - вниз
     double scale = getScaleFactor();
-    int markerHalf = std::max(2, int(5 * scale));
+    int markerHalf = (std::max)(2, int(5 * scale));
     int markerLeft = int(spoilerMarkerLeft * scale);
     int centerY = texture.height() / 2;
     Pixel markerColor(textColor.r, textColor.g, textColor.b);

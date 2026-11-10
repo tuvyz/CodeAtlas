@@ -112,7 +112,7 @@ bool ValueEdit::handleEvent(const SDL_Event& event) {
             }
             if (isDragging) {
                 int stepsCount = int(-offset.y / (pixelsPerStep * scale));
-                double value = std::min(std::max(dragStartValue + stepsCount * step, range.first), range.second);
+                double value = (std::min)(std::max(dragStartValue + stepsCount * step, range.first), range.second);
                 if (value != getValue())
                     setValue(value);
                 guiContext->setSystemCursor(SDL_SYSTEM_CURSOR_SIZENS);
@@ -161,8 +161,8 @@ bool ValueEdit::handleEvent(const SDL_Event& event) {
 
 // Установить значение
 void ValueEdit::setValue(double value) {
-    value = std::max(value, range.first);
-    value = std::min(value, range.second);
+    value = (std::max)(value, range.first);
+    value = (std::min)(value, range.second);
     setText(detail::doubleToWString(value));
     em.emitEvent(ValueChanged_Event(this, detail::wstringToDouble(contextText)));
 }
@@ -173,8 +173,8 @@ void ValueEdit::setValue(double value) {
 // Получить значение
 double ValueEdit::getValue() {
     auto value = detail::wstringToDouble(contextText);
-    value = std::max(value, range.first);
-    value = std::min(value, range.second);
+    value = (std::max)(value, range.first);
+    value = (std::min)(value, range.second);
     return value;
 }
 

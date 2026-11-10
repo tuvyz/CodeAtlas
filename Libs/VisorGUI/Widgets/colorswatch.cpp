@@ -57,7 +57,7 @@ void ColorSwatch::updateTexture() {
     if (width <= 0 || height <= 0)
         return;
 
-    int border = std::max(1, int(2 * guiContext->windowScaleFactor()));
+    int border = (std::max)(1, int(2 * guiContext->windowScaleFactor()));
     std::ranges::fill(texture.data, Pixel(isCursorOnSwatch ? 200 : 25));
     texture.drawRectangle(border, border, width - 2 * border, height - 2 * border, Pixel(swatchColor.r, swatchColor.g, swatchColor.b));
     texture.update();

@@ -30,8 +30,8 @@ bool ScrollAreaWidget::handleEvent(const SDL_Event& event) {
         if (event.type == SDL_MOUSEMOTION) {
             // Заголовок не уходит за край экрана
             glm::dvec2 newPos = glm::dvec2(event.motion.x, event.motion.y) - dragGrabOffset;
-            newPos.x = std::clamp(newPos.x, 0.0, std::max(0.0, double(guiContext->windowSize().width) - widgetSize.width));
-            newPos.y = std::clamp(newPos.y, 0.0, std::max(0.0, double(guiContext->windowSize().height) - offsetWorkArea.y));
+            newPos.x = std::clamp(newPos.x, 0.0, (std::max)(0.0, double(guiContext->windowSize().width) - widgetSize.width));
+            newPos.y = std::clamp(newPos.y, 0.0, (std::max)(0.0, double(guiContext->windowSize().height) - offsetWorkArea.y));
             standardWidgetPos = (newPos + glm::dvec2(widgetSize.width * nullOffset.x, widgetSize.height * nullOffset.y)) / getScaleFactor();
 
             // Размер не меняется, поэтому окно и дети только пересчитывают положение и квад, без перерисовки текстур
@@ -132,9 +132,9 @@ void ScrollAreaWidget::render() {
             double childWidth = child->getSizePolicy().first == FIXED_SIZE ? child->getStandardWidgetSize().width : child->getWidgetSize().width / scale;
             double childHeight = child->getSizePolicy().second == FIXED_SIZE ? child->getStandardWidgetSize().height : child->getWidgetSize().height / scale;
             if (childPos.x >= 0)
-                contentFar.x = std::max(contentFar.x, childPos.x + childWidth * (1 - childNullOffset.x));
+                contentFar.x = (std::max)(contentFar.x, childPos.x + childWidth * (1 - childNullOffset.x));
             if (childPos.y >= 0)
-                contentFar.y = std::max(contentFar.y, childPos.y + childHeight * (1 - childNullOffset.y));
+                contentFar.y = (std::max)(contentFar.y, childPos.y + childHeight * (1 - childNullOffset.y));
         }
         
         // Окно вокруг содержимого: рамки, заголовок, место под полосы прокрутки
@@ -143,16 +143,16 @@ void ScrollAreaWidget::render() {
         double titleHeight = contextText.empty() ? 0 : standardNameAreaHeight;
         double bordersSize = 2.0 * borderSize / scale;
         MySize<double> fitSize(std::max(fitMinSize.width, contentFar.x + contentPadding + bordersSize + scrollerAreaX),
-                               std::max(fitMinSize.height, contentFar.y + contentPadding + titleHeight + bordersSize + scrollerAreaY));
+                               (std::max)(fitMinSize.height, contentFar.y + contentPadding + titleHeight + bordersSize + scrollerAreaY));
         
         // За край экрана не вылезает (растущее влево - за левый), низ держится выше отступа
         double rightEdge = standardWidgetPos.x + standardWidgetSize.width;
         if (isFitGrowsLeft)
-            fitSize.width = std::min(fitSize.width, rightEdge);
+            fitSize.width = (std::min)(fitSize.width, rightEdge);
         else if (standardWidgetPos.x >= 0)
-            fitSize.width = std::min(fitSize.width, guiContext->windowSize().width / scale - standardWidgetPos.x);
+            fitSize.width = (std::min)(fitSize.width, guiContext->windowSize().width / scale - standardWidgetPos.x);
         if (standardWidgetPos.y >= 0)
-            fitSize.height = std::min(fitSize.height, guiContext->windowSize().height / scale - standardWidgetPos.y - fitBottomMargin);
+            fitSize.height = (std::min)(fitSize.height, guiContext->windowSize().height / scale - standardWidgetPos.y - fitBottomMargin);
         
         if (std::abs(fitSize.width - standardWidgetSize.width) > 0.5 || std::abs(fitSize.height - standardWidgetSize.height) > 0.5) {
             if (isFitGrowsLeft)

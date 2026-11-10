@@ -78,13 +78,13 @@ double VerticalLayout::fitWidth() {
             double widgetWidth = widget->fitWidth();
             double x = widget->getStandardWidgetPos().x;
             if (item.isStretched)
-                leftPart = std::max(leftPart, 2 * x + widgetWidth);
+                leftPart = (std::max)(leftPart, 2 * x + widgetWidth);
             else if (x >= 0)
-                leftPart = std::max(leftPart, x + widgetWidth * (1 - widget->getNullOffset().x));
+                leftPart = (std::max)(leftPart, x + widgetWidth * (1 - widget->getNullOffset().x));
             else
-                rightPart = std::max(rightPart, -x + widgetWidth * widget->getNullOffset().x);
+                rightPart = (std::max)(rightPart, -x + widgetWidth * widget->getNullOffset().x);
         }
-        width = std::max(width, leftPart + rightPart + (leftPart > 0 && rightPart > 0 ? sidesGap : 0));
+        width = (std::max)(width, leftPart + rightPart + (leftPart > 0 && rightPart > 0 ? sidesGap : 0));
     }
     return width;
 }
@@ -107,7 +107,7 @@ void VerticalLayout::arrange(double width) {
         for (Item &item : row.items) {
             AbstractWidget *widget = item.widget;
             VerticalLayout *nestedLayout = dynamic_cast<VerticalLayout*>(widget);
-            double stretchedWidth = std::max(0.0, width - 2 * widget->getStandardWidgetPos().x);
+            double stretchedWidth = (std::max)(0.0, width - 2 * widget->getStandardWidgetPos().x);
             if (nestedLayout != nullptr)
                 nestedLayout->arrange(item.isStretched ? stretchedWidth : nestedLayout->fitWidth());
             else if (item.isStretched && widget->getStandardWidgetSize().width != stretchedWidth)
@@ -118,7 +118,7 @@ void VerticalLayout::arrange(double width) {
         double rowHeight = row.height;
         if (row.height == 0)
             for (Item &item : row.items)
-                rowHeight = std::max(rowHeight, item.widget->getStandardWidgetSize().height);
+                rowHeight = (std::max)(rowHeight, item.widget->getStandardWidgetSize().height);
 
         // Виджет встаёт в ту же долю строки, что и его точка привязки
         for (Item &item : row.items) {

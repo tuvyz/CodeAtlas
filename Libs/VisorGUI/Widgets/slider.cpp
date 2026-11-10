@@ -105,9 +105,9 @@ void Slider::setRange(double min, double max, double step) {
 
 // Установить значение (в единицах диапазона): за краями обрезается, со шагом - снимается на ближайшее деление. Сигнал не шлёт
 void Slider::setValue(double newValue) {
-    newValue = std::clamp(newValue, std::min(minValue, maxValue), std::max(minValue, maxValue));
+    newValue = std::clamp(newValue, (std::min)(minValue, maxValue), (std::max)(minValue, maxValue));
     if (step > 0)
-        newValue = std::clamp(minValue + std::round((newValue - minValue) / step) * step, std::min(minValue, maxValue), std::max(minValue, maxValue));
+        newValue = std::clamp(minValue + std::round((newValue - minValue) / step) * step, (std::min)(minValue, maxValue), (std::max)(minValue, maxValue));
     value = newValue;
     sliderPos = maxValue != minValue ? (value - minValue) / (maxValue - minValue) : 0;
     updateLater();

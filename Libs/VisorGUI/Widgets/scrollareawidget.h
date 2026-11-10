@@ -173,13 +173,13 @@ public:
 
         isNeedScroll = true;
 
-        scrollerPos = std::max<double>(scrollerPos, 0);
+        scrollerPos = (std::max<double>)(scrollerPos, 0);
         if (type == Vertical) {
-            scrollerPos = std::min<double>(scrollerPos, widget.getRealWidgetSize().height - widget.getWorkAreaSize().height - 1);
+            scrollerPos = (std::min<double>)(scrollerPos, widget.getRealWidgetSize().height - widget.getWorkAreaSize().height - 1);
             scrollerHeight = widget.getWorkAreaSize().height * (widget.getWorkAreaSize().height / widget.getRealWidgetSize().height);
             nullScroller = widget.getOffsetWorkArea().y + scrollerPos * widget.getWorkAreaSize().height / widget.getRealWidgetSize().height;
         } else { // Horizontal
-            scrollerPos = std::min<double>(scrollerPos, widget.getRealWidgetSize().width - widget.getWorkAreaSize().width - 1);
+            scrollerPos = (std::min<double>)(scrollerPos, widget.getRealWidgetSize().width - widget.getWorkAreaSize().width - 1);
             scrollerWidth = widget.getWorkAreaSize().width * (widget.getWorkAreaSize().width / widget.getRealWidgetSize().width);
             nullScroller = widget.getOffsetWorkArea().x + scrollerPos * widget.getWorkAreaSize().width / widget.getRealWidgetSize().width;
         }
@@ -193,7 +193,7 @@ public:
         Pixel scrollerColor = isCursorOnScroller ? theme().scrollerHover : theme().scroller;
         if (isNeedScroll) {
             if (type == Vertical) {
-                for (int y = nullScroller; y < std::min(nullScroller + scrollerHeight, widget.getWidgetSize().height); ++y) {
+                for (int y = nullScroller; y < (std::min)(nullScroller + scrollerHeight, widget.getWidgetSize().height); ++y) {
                     for (int x = widget.getWidgetSize().width - widget.getOffsetWorkArea().x - scrollerAreaSize; x < widget.getWidgetSize().width - widget.getBorderSize(); ++x) {
                         int id = (x + y * widget.getTexture().width());
                         widget.getTexture().data[id] = scrollerColor;
@@ -201,7 +201,7 @@ public:
                 }
             } else { // Horizontal
                 for (int y = widget.getWidgetSize().height - widget.getBorderSize() - scrollerAreaSize; y < widget.getWidgetSize().height - widget.getBorderSize(); ++y) {
-                    for (int x = nullScroller; x < std::min(nullScroller + scrollerWidth, widget.getWidgetSize().width - widget.getBorderSize()); ++x) {
+                    for (int x = nullScroller; x < (std::min)(nullScroller + scrollerWidth, widget.getWidgetSize().width - widget.getBorderSize()); ++x) {
                         int id = (x + y * widget.getTexture().width());
                         widget.getTexture().data[id] = scrollerColor;
                     }

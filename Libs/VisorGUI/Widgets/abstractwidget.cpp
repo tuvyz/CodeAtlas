@@ -213,7 +213,7 @@ double AbstractWidget::fitWidth() {
     MySize<double> ownWidgetSize = widgetSize;
     sizePolicy.first = BY_CONTEXT_TEXT_SIZE;
     calcWidgetSize();
-    double width = std::max(minSize.width, widgetSize.width / getScaleFactor());
+    double width = (std::max)(minSize.width, widgetSize.width / getScaleFactor());
     sizePolicy = ownSizePolicy;
     widgetSize = ownWidgetSize;
     return width;
@@ -414,7 +414,7 @@ void AbstractWidget::enableParentScissor() {
     // OpenGL считает Y от нижнего края окна
     glEnable(GL_SCISSOR_TEST);
     glScissor(int(clipMin.x), int(guiContext->windowSize().height - clipMax.y),
-              std::max(0, int(clipMax.x - clipMin.x)), std::max(0, int(clipMax.y - clipMin.y)));
+              (std::max)(0, int(clipMax.x - clipMin.x)), (std::max)(0, int(clipMax.y - clipMin.y)));
 }
 
 

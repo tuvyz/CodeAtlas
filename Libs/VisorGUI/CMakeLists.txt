@@ -12,6 +12,11 @@ file(GLOB VGUI_SOURCES CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/guiengine.cpp)
 
 add_library(VisorGUI STATIC ${VGUI_SOURCES})
+if(WIN32)
+    # Диалог файлов Windows (GetOpenFileNameW); NOMINMAX - windows.h без макросов min и max в единицах библиотеки
+    target_link_libraries(VisorGUI PUBLIC comdlg32)
+    target_compile_definitions(VisorGUI PRIVATE NOMINMAX)
+endif()
 target_compile_features(VisorGUI PUBLIC cxx_std_20)
 get_filename_component(VGUI_PARENT_DIR ${CMAKE_CURRENT_SOURCE_DIR} DIRECTORY)
 target_include_directories(VisorGUI PUBLIC ${VGUI_PARENT_DIR} ${VGUI_DEPENDENCY_INCLUDE_DIRS})

@@ -167,8 +167,8 @@ bool LineEdit::handleEvent(const SDL_Event& event) {
         case SDLK_c: { // Копирование текста в буфер обмена при CTRL+C
             if (event.key.keysym.mod & KMOD_CTRL) {
                 if (isFocused() && isSelectAreaValid) {
-                    int start = std::min(selectSymbol.first, selectSymbol.second);
-                    int end = std::max(selectSymbol.first, selectSymbol.second);
+                    int start = (std::min)(selectSymbol.first, selectSymbol.second);
+                    int end = (std::max)(selectSymbol.first, selectSymbol.second);
 
                     std::wstring selectedText = contextText.substr(start, end + 1 - start);
 
@@ -468,8 +468,8 @@ void LineEdit::eraceSymbolFromText(bool isFromLeft, bool isEmitSignal) {
             }
         }
     } else {
-        int start = std::min(selectSymbol.first, selectSymbol.second);
-        int end = std::max(selectSymbol.first, selectSymbol.second);
+        int start = (std::min)(selectSymbol.first, selectSymbol.second);
+        int end = (std::max)(selectSymbol.first, selectSymbol.second);
         deletedText = contextText.substr(start, end + 1 - start);  // Сохраняем удалённые символы
         contextText.erase(start, end + 1 - start);
         setCaretNum(start);
@@ -525,8 +525,8 @@ void LineEdit::calcGlyphOffset() {
 // Ограничение каретки в границах
 void LineEdit::setCaretNum(int newNum) {
     caretSymbolNum = newNum;
-    caretSymbolNum = std::max<int>(0, caretSymbolNum);
-    caretSymbolNum = std::min<int>(contextText.size(), caretSymbolNum);
+    caretSymbolNum = (std::max<int>)(0, caretSymbolNum);
+    caretSymbolNum = (std::min<int>)(contextText.size(), caretSymbolNum);
 
     int caretSymbolPosX = textOffset + offsetWorkArea.x;
     if (!glyphOffsets.empty()) {
@@ -609,10 +609,10 @@ void LineEdit::updateTexture() {
 
     // Отрисовка выделенной области
     if (isSelectAreaValid) {
-        glm::ivec2 areaTopLeft = {std::min(selectAreaFirstPos.x, selectAreaSecondPos.x) + scrollOffset.x,
-                                  std::min(selectAreaFirstPos.y, selectAreaSecondPos.y)};
-        glm::ivec2 areaBottomRight = {std::max(selectAreaFirstPos.x, selectAreaSecondPos.x) + scrollOffset.x,
-                                      std::max(selectAreaFirstPos.y, selectAreaSecondPos.y)};
+        glm::ivec2 areaTopLeft = {(std::min)(selectAreaFirstPos.x, selectAreaSecondPos.x) + scrollOffset.x,
+                                  (std::min)(selectAreaFirstPos.y, selectAreaSecondPos.y)};
+        glm::ivec2 areaBottomRight = {(std::max)(selectAreaFirstPos.x, selectAreaSecondPos.x) + scrollOffset.x,
+                                      (std::max)(selectAreaFirstPos.y, selectAreaSecondPos.y)};
 
         // Размеры выделенной области
         int rectWidth = areaBottomRight.x - areaTopLeft.x + 1;

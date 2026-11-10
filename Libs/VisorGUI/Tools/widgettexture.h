@@ -31,15 +31,15 @@ public:
     // Отрисовка прямоугольника
     void drawRectangle(int x, int y, int width, int height, Pixel color) {
         // Корректируем начальные координаты, чтобы они не выходили за границы текстуры
-        int correctedX = std::max(0, x);
-        int correctedY = std::max(0, y);
+        int correctedX = (std::max)(0, x);
+        int correctedY = (std::max)(0, y);
 
         // Корректируем ширину и высоту на основе изменения начальных координат
         int overflowX = correctedX - x; // Если x был отрицательным, overflowX будет положительным
         int overflowY = correctedY - y; // Если y был отрицательным, overflowY будет положительным
 
-        int correctedWidth = std::min(width - overflowX, _width - correctedX);
-        int correctedHeight = std::min(height - overflowY, _height - correctedY);
+        int correctedWidth = (std::min)(width - overflowX, _width - correctedX);
+        int correctedHeight = (std::min)(height - overflowY, _height - correctedY);
 
         // Заполняем строки по одной, с учетом скорректированных значений
         for (int j = correctedY; j < correctedY + correctedHeight; ++j) {
@@ -104,14 +104,14 @@ public:
     void drawPixels(int x, int y, int width, int height, const Pixel *pixels, int sourceWidth, int sourceHeight) {
         if (width <= 0 || height <= 0 || sourceWidth <= 0 || sourceHeight <= 0)
             return;
-        for (int targetY = std::max(0, y); targetY < std::min(_height, y + height); ++targetY) {
+        for (int targetY = (std::max)(0, y); targetY < (std::min)(_height, y + height); ++targetY) {
             // Строки источника и доля между ними
             float sourceY = std::clamp((targetY - y + 0.5f) * sourceHeight / height - 0.5f, 0.f, float(sourceHeight - 1));
-            int sourceY0 = int(sourceY), sourceY1 = std::min(sourceY0 + 1, sourceHeight - 1);
+            int sourceY0 = int(sourceY), sourceY1 = (std::min)(sourceY0 + 1, sourceHeight - 1);
             float shareY = sourceY - sourceY0;
-            for (int targetX = std::max(0, x); targetX < std::min(_width, x + width); ++targetX) {
+            for (int targetX = (std::max)(0, x); targetX < (std::min)(_width, x + width); ++targetX) {
                 float sourceX = std::clamp((targetX - x + 0.5f) * sourceWidth / width - 0.5f, 0.f, float(sourceWidth - 1));
-                int sourceX0 = int(sourceX), sourceX1 = std::min(sourceX0 + 1, sourceWidth - 1);
+                int sourceX0 = int(sourceX), sourceX1 = (std::min)(sourceX0 + 1, sourceWidth - 1);
                 float shareX = sourceX - sourceX0;
 
                 // Четыре соседа источника с весами, цвет взвешивается ещё и альфой, чтобы прозрачный фон не темнил края
@@ -208,8 +208,8 @@ public:
         int oglY = parentTexture._height - childPos.y - this->_height;
 
         // Рассчитываем размеры для копирования с учетом границ родительской текстуры
-        int copyWidth = std::min(this->_width, parentTexture._width - childPos.x);
-        int copyHeight = std::min(this->_height, parentTexture._height - oglY);
+        int copyWidth = (std::min)(this->_width, parentTexture._width - childPos.x);
+        int copyHeight = (std::min)(this->_height, parentTexture._height - oglY);
 
         // Проверка на отрицательные координаты
         if (childPos.x < 0) {

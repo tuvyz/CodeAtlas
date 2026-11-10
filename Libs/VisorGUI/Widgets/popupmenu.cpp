@@ -34,8 +34,8 @@ PopupMenu::PopupMenu(glm::vec2 standardPos, const std::vector<std::wstring> &ite
 // Расчёт позиции виджета (меню не вылезает за края окна)
 void PopupMenu::calcWidgetPos() {
     AbstractWidget::calcWidgetPos();
-    widgetPos.x = std::max(0.0, std::min(widgetPos.x, double(guiContext->windowSize().width - widgetSize.width)));
-    widgetPos.y = std::max(0.0, std::min(widgetPos.y, double(guiContext->windowSize().height - widgetSize.height)));
+    widgetPos.x = (std::max)(0.0, (std::min)(widgetPos.x, double(guiContext->windowSize().width - widgetSize.width)));
+    widgetPos.y = (std::max)(0.0, (std::min)(widgetPos.y, double(guiContext->windowSize().height - widgetSize.height)));
 }
 
 
