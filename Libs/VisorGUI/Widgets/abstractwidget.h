@@ -1,6 +1,7 @@
 #ifndef ABSTRACTWIDGET_H
 #define ABSTRACTWIDGET_H
 
+#include <cmath>
 #include <VisorGUI/Core/OpenGL.h>
 #include <VisorGUI/Core/Core.h>
 #include <VisorGUI/Tools/widgettexture.h>

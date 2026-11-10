@@ -256,6 +256,7 @@ void App::createGui() {
     // Полоса истории снизу
     historyBar = new vgui::ScrollAreaWidget(vgui::MySize<double>(800, historyHeight), glm::dvec2(edgeGap, -edgeGap), fixedSize, inWindow, glm::dvec2(0, 1));
     historyBar->enableScrollers(false);
+    historyBar->setVisible(false);
     gui->addGuiObject(historyBar);
 
     auto *historyTitle = new vgui::Label(vgui::MySize<double>(90, 30), glm::dvec2(16, 14), fixedSize, inParent, glm::dvec2(0, 0), L"История");

@@ -324,13 +324,22 @@ void AbstractWidget::calcWidgetPos(){
 // Обновление буфера
 void AbstractWidget::updateBuffer() {
 
-    texture.create(widgetSize.width, widgetSize.height);
+    int textureWidth = int(widgetSize.width);
+    int textureHeight = int(widgetSize.height);
+    texture.create(textureWidth, textureHeight);
+
+    // Квад - на целых пикселях окна и размером с текстуру: пиксель текстуры ложится в пиксель экрана один к одному.
+    // При масштабе окна не 1 (высота не 1080) места и размеры дробные, и без этого текст и рамки размываются
+    double left = std::floor(widgetPos.x + 0.5);
+    double top = std::floor(widgetPos.y + 0.5);
+    double windowWidth = guiContext->windowSize().width;
+    double windowHeight = guiContext->windowSize().height;
 
     // Преобразуем координаты в систему OpenGL (-1 до 1)
-    float xMin = 2 * widgetPos.x / guiContext->windowSize().width - 1;
-    float xMax = 2 * (widgetPos.x + widgetSize.width) / guiContext->windowSize().width - 1;
-    float yMin = 2 * (guiContext->windowSize().height - widgetPos.y - widgetSize.height) / guiContext->windowSize().height - 1;
-    float yMax = 2 * (guiContext->windowSize().height - widgetPos.y) / guiContext->windowSize().height - 1;
+    float xMin = float(2 * left / windowWidth - 1);
+    float xMax = float(2 * (left + textureWidth) / windowWidth - 1);
+    float yMin = float(2 * (windowHeight - top - textureHeight) / windowHeight - 1);
+    float yMax = float(2 * (windowHeight - top) / windowHeight - 1);
     quadRect = glm::vec4(xMin, yMin, xMax, yMax);
 }
 
