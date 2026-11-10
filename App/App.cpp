@@ -965,6 +965,7 @@ void App::startNextJob() {
         project.load(project.root);
     jobProject = project;
     analyzer.threadsCount = settings().scanThreads;
+    analyzer.isStopRequested = false;
     analyzer.unitsTotal = 0;
     analyzer.unitsDone = 0;
     switch (next) {
@@ -1012,7 +1013,11 @@ void App::startNextJob() {
         break;
 
     case JobKind::CommitGraph:
-        statusLabel->setText(L"Граф коммита " + stringToWString(jobCommit.substr(0, 7)) + L"…");
+        jobFilesTotal = 0;
+        jobFilesRead = 0;
+        statusLabel->setText(L"Граф коммита " + stringToWString(jobCommit.substr(0, 7)) + L": отличия от рабочей папки…");
+        scanProgress->setValue(0, vgui::Pixel(47, 111, 223));
+        scanProgress->setVisible(true);
         jobThread = std::thread([this, dataDir]() {
             // Файлы, которые в рабочей папке не такие, как на коммите: текст их версии на коммите (код и шейдеры)
             std::map<std::wstring, char> changed;
@@ -1031,14 +1036,24 @@ void App::startNextJob() {
             for (const auto &[file, status] : changed) {
                 std::wstring extension = std::filesystem::path(file).extension().wstring();
                 std::transform(extension.begin(), extension.end(), extension.begin(), ::towlower);
-                if (codeExtensions.count(extension) == 0 && shaderExtensions.count(extension) == 0 && scanState.fileTimes.count(file) == 0)
-                    continue;
-                files.insert(file);
+                if (codeExtensions.count(extension) > 0 || shaderExtensions.count(extension) > 0 || scanState.fileTimes.count(file) > 0)
+                    files.insert(file);
+            }
+            jobFilesTotal = int(files.size());
+            for (const std::wstring &file : files) {
                 std::string content;
-                if (status != 'A' && Git::fileAt(jobProject.root, jobCommit, file, content))
+                if (changed[file] != 'A' && Git::fileAt(jobProject.root, jobCommit, file, content))
                     versions.contents[file] = content;
                 else
                     versions.absentFiles.insert(file);
+                ++jobFilesRead;
+                if (analyzer.isStopRequested)
+                    break;
+            }
+            if (analyzer.isStopRequested) {
+                jobError = L"Граф коммита остановлен";
+                isJobFinished = true;
+                return;
             }
 
             // Проект на коммите: разобранное сейчас, отличающиеся файлы - пересканированные в версии коммита
@@ -1086,6 +1101,20 @@ void App::pollJob() {
     if (jobKind == JobKind::Scan && total > 0) {
         statusLabel->setText(L"Разбор: " + std::to_wstring(done) + L" из " + std::to_wstring(total));
         scanProgress->setValue(float(done) / float(total), vgui::Pixel(47, 111, 223));
+    }
+
+    // Граф коммита: сначала файлы той версии из git, потом разбор единиц с ними
+    if (jobKind == JobKind::CommitGraph) {
+        std::wstring commitText = L"Граф коммита " + stringToWString(jobCommit.substr(0, 7));
+        int filesTotal = jobFilesTotal;
+        int filesRead = jobFilesRead;
+        if (total > 0) {
+            statusLabel->setText(commitText + L": разбор " + std::to_wstring(done) + L" из " + std::to_wstring(total));
+            scanProgress->setValue(float(done) / float(total), vgui::Pixel(47, 111, 223));
+        } else if (filesTotal > 0) {
+            statusLabel->setText(commitText + L": файлы из git " + std::to_wstring(filesRead) + L" из " + std::to_wstring(filesTotal));
+            scanProgress->setValue(float(filesRead) / float(filesTotal), vgui::Pixel(47, 111, 223));
+        }
     }
     if (!isJobFinished)
         return;
@@ -1147,7 +1176,9 @@ void App::pollJob() {
 
     case JobKind::CommitGraph:
         if (!isJobSucceeded) {
-            failedCommits.insert(jobCommit);
+            // Остановленный (выбран другой коммит, команда git) соберётся снова, когда понадобится
+            if (!analyzer.isStopRequested)
+                failedCommits.insert(jobCommit);
             statusLabel->setText(jobError);
             break;
         }
@@ -1288,7 +1319,11 @@ void App::requestGitCommand(GitCommand command) {
         }
     }
     requestedGitCommand = command;
-    if (jobKind != JobKind::None)
+
+    // Граф коммита может собираться минутами: он останавливается и соберётся после команды
+    if (jobKind == JobKind::CommitGraph)
+        analyzer.isStopRequested = true;
+    else if (jobKind != JobKind::None)
         statusLabel->setText(L"Команда git - после текущей работы");
 }
 
@@ -2001,6 +2036,12 @@ int App::run(const std::wstring &projectRoot) {
             commitListWindow->setVisible(false);
             saveGitChoice();
             updateComparison();
+
+            // Граф прежнего выбора больше не нужен - не ждать его
+            if (jobKind == JobKind::CommitGraph && jobCommit != compareCommit && jobCommit != headCommit)
+                analyzer.isStopRequested = true;
+            if (isScanStateLoaded && scanState.files.empty())
+                statusLabel->setText(L"Сравнение с коммитами - после «Сканировать»: старая карта не хранит разбор по файлам");
         }
         checkChanges();
         pollJob();

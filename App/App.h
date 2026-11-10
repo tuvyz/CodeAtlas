@@ -99,6 +99,8 @@ private:
     Graph jobGraph;                            // Граф по итогам задачи
     std::set<std::wstring> jobFiles;           // Файлы пересканирования
     std::string jobCommit;                     // Коммит графа коммита
+    std::atomic<int> jobFilesTotal = 0;        // Файлов коммита, отличающихся от рабочей папки (ход чтения из git)
+    std::atomic<int> jobFilesRead = 0;
     GitCommand jobGitCommand = GitCommand::None;
     std::string jobGitOutput;
     std::string jobHeadBefore;                 // HEAD до pull
