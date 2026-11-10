@@ -9,7 +9,8 @@
 name: VoxelGame
 
 # Папка с compile_commands.json, от корня проекта или полный путь.
-# CMake пишет его при set(CMAKE_EXPORT_COMPILE_COMMANDS ON) с генератором Ninja или Makefile
+# CMake пишет его при set(CMAKE_EXPORT_COMPILE_COMMANDS ON) с генератором Ninja или Makefile.
+# Нет его там - ищется в .codeatlas проекта, потом самый свежий в папках проекта и в соседних build-<проект>-... (Qt Creator)
 compile_commands: build
 
 # Папки от корня проекта, которые на карту не попадают (сторонние библиотеки и т.п.). Папка сборки не попадает и так
@@ -38,6 +39,7 @@ event_regex: "_[ucdr]?Event$"
 Папка `.codeatlas` в корне проекта:
 - `layout.txt` - места блоков, пометки и вид камеры; можно хранить в git вместе с проектом
 - `history/` - снимки графа по сканированиям (index.txt и графы), в git не кладётся (`.codeatlas/.gitignore` программа пишет сама)
+- `compile_commands.json` - копия из папки сборки, если её туда кладёт сборка проекта (см. README); в git не кладётся
 
 ## Сканирование без окна
 

@@ -508,26 +508,41 @@ private:
 
 // Папка с compile_commands.json: из шаблона, а нет там - самая свежая в папках проекта до трёх уровней (сборки Qt Creator и т.п.)
 std::filesystem::path Analyzer::findCompileCommandsDir(const ProjectTemplate &project) {
-    std::filesystem::path configured = std::filesystem::path(project.root) / project.compileCommandsDir;
+    // Сначала - папка из шаблона, потом .codeatlas проекта (туда его может копировать сборка проекта)
+    std::filesystem::path root(project.root);
     std::error_code errorCode;
-    if (std::filesystem::exists(configured / "compile_commands.json", errorCode))
-        return configured;
+    for (std::filesystem::path folder : {root / project.compileCommandsDir, root / ".codeatlas"}) {
+        if (std::filesystem::exists(folder / "compile_commands.json", errorCode))
+            return folder;
+    }
 
+    // Иначе самый свежий: в папках проекта до трёх уровней (кроме скрытых) и в соседних папках сборки Qt Creator вида build-<проект>-<комплект>
     std::filesystem::path newest;
     std::filesystem::file_time_type newestTime;
-    std::filesystem::recursive_directory_iterator iterator(project.root, std::filesystem::directory_options::skip_permission_denied, errorCode);
-    for (; !errorCode && iterator != std::filesystem::recursive_directory_iterator(); iterator.increment(errorCode)) {
-        if (iterator.depth() >= 3 || iterator->path().filename().string().rfind('.', 0) == 0) {
-            iterator.disable_recursion_pending();
-            continue;
+    auto searchIn = [&](const std::filesystem::path &start) {
+        std::error_code searchError;
+        std::filesystem::recursive_directory_iterator iterator(start, std::filesystem::directory_options::skip_permission_denied, searchError);
+        for (; !searchError && iterator != std::filesystem::recursive_directory_iterator(); iterator.increment(searchError)) {
+            if (iterator.depth() >= 3 || iterator->path().filename().wstring().rfind(L'.', 0) == 0) {
+                iterator.disable_recursion_pending();
+                continue;
+            }
+            if (iterator->path().filename() != "compile_commands.json")
+                continue;
+            std::filesystem::file_time_type time = std::filesystem::last_write_time(iterator->path(), searchError);
+            if (newest.empty() || time > newestTime) {
+                newest = iterator->path().parent_path();
+                newestTime = time;
+            }
         }
-        if (iterator->path().filename() != "compile_commands.json")
-            continue;
-        std::filesystem::file_time_type time = std::filesystem::last_write_time(iterator->path(), errorCode);
-        if (newest.empty() || time > newestTime) {
-            newest = iterator->path().parent_path();
-            newestTime = time;
-        }
+    };
+    searchIn(root);
+    std::wstring projectFolderName = root.filename().wstring();
+    for (std::filesystem::directory_iterator sibling(root.parent_path(), errorCode); !errorCode && sibling != std::filesystem::directory_iterator();
+         sibling.increment(errorCode)) {
+        std::wstring name = sibling->path().filename().wstring();
+        if (sibling->is_directory(errorCode) && name.rfind(L"build", 0) == 0 && name.find(projectFolderName) != std::wstring::npos)
+            searchIn(sibling->path());
     }
     return newest;
 }
@@ -568,7 +583,8 @@ bool Analyzer::scan(const ProjectTemplate &project, Graph &graph, std::wstring &
 
     std::filesystem::path compileDir = findCompileCommandsDir(project);
     if (compileDir.empty()) {
-        error = L"Не найден compile_commands.json: в CMake включить CMAKE_EXPORT_COMPILE_COMMANDS и указать папку сборки в codeatlas.yaml (compile_commands)";
+        error = L"Не найден compile_commands.json: в CMakeLists.txt проекта set(CMAKE_EXPORT_COMPILE_COMMANDS ON), генератор Ninja, пересобрать; "
+                L"папку сборки - в codeatlas.yaml (compile_commands)";
         return false;
     }
     CXCompilationDatabase_Error databaseError;

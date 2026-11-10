@@ -43,7 +43,14 @@ cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Release && ninja -C build
 
 Запуск: `CodeAtlas [папка проекта]` (без папки - последний открытый проект). Сканирование без окна: `CodeAtlas --scan <папка проекта> [--out <файл графа>]`.
 
-Анализируемому проекту нужен compile_commands.json: в его CMakeLists.txt `set(CMAKE_EXPORT_COMPILE_COMMANDS ON)` и генератор Ninja или Makefile (в Qt Creator - по умолчанию Ninja).
+Анализируемому проекту нужен compile_commands.json - список файлов с флагами сборки. Его пишет CMake: в CMakeLists.txt проекта `set(CMAKE_EXPORT_COMPILE_COMMANDS ON)`, генератор Ninja или Makefile (в Qt Creator по умолчанию Ninja), пересобрать. CodeAtlas ищет его по порядку: папка `compile_commands` из codeatlas.yaml (по умолчанию `build`), `.codeatlas` проекта, папки проекта до трёх уровней и соседние папки сборки Qt Creator вида `build-<проект>-...`. Чтобы не зависеть от места сборки, проект может сам класть копию в `.codeatlas`:
+
+```cmake
+if(CMAKE_GENERATOR MATCHES "Ninja|Makefiles")
+    add_custom_target(CodeAtlasCompileCommands ALL
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/compile_commands.json ${CMAKE_SOURCE_DIR}/.codeatlas/compile_commands.json)
+endif()
+```
 
 ## Где что
 

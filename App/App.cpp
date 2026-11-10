@@ -322,11 +322,22 @@ void App::saveLayout() {
     std::filesystem::path folder = std::filesystem::path(project.root) / ".codeatlas";
     layout.save((folder / "layout.txt").wstring());
 
-    // Раскладку можно хранить в git вместе с проектом, историю и граф - нет
-    std::error_code errorCode;
-    if (!std::filesystem::exists(folder / ".gitignore", errorCode)) {
-        std::ofstream ignore(folder / ".gitignore");
-        ignore << "history/\ngraph.txt\n";
+    // Раскладку можно хранить в git вместе с проектом, историю, граф и копию compile_commands.json - нет (недостающие строки дописываются)
+    std::string ignoreText;
+    {
+        std::ifstream ignore(folder / ".gitignore", std::ios::binary);
+        ignoreText.assign(std::istreambuf_iterator<char>(ignore), std::istreambuf_iterator<char>());
+    }
+    std::string missingLines;
+    for (const char *line : {"history/", "graph.txt", "compile_commands.json"}) {
+        if (ignoreText.find(line) == std::string::npos)
+            missingLines += std::string(line) + "\n";
+    }
+    if (!missingLines.empty()) {
+        std::ofstream ignore(folder / ".gitignore", std::ios::binary | std::ios::app);
+        if (!ignoreText.empty() && ignoreText.back() != '\n')
+            ignore << '\n';
+        ignore << missingLines;
     }
 }
 
