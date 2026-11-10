@@ -95,8 +95,8 @@ LayoutRect Layout::fileFrame(const Graph &graph, const std::vector<int> &fileNod
     if (!hasNodes)
         return LayoutRect();
     LayoutRect rect;
-    rect.position = minimum - glm::dvec2(framePadding, framePadding + frameHeaderHeight());
-    rect.size = maximum - minimum + glm::dvec2(2 * framePadding, 2 * framePadding + frameHeaderHeight());
+    rect.position = minimum - glm::dvec2(framePadding, framePadding + frameHeaderHeight);
+    rect.size = maximum - minimum + glm::dvec2(2 * framePadding, 2 * framePadding + frameHeaderHeight);
     rect.size.x = std::max(rect.size.x, frameTitleWidth(graph.nodes[fileNodes.front()].file));
     return rect;
 }
@@ -106,7 +106,7 @@ LayoutRect Layout::fileFrame(const Graph &graph, const std::vector<int> &fileNod
 double Layout::frameTitleWidth(const std::wstring &file) {
     size_t slash = file.rfind(L'/');
     size_t nameLength = slash == std::wstring::npos ? file.size() : file.size() - slash - 1;
-    return double(nameLength) * frameTitleSize() * 0.6 + 2 * framePadding + 6;
+    return double(nameLength) * frameTitleSize * 0.6 + 2 * framePadding + 6;
 }
 
 
@@ -125,7 +125,7 @@ glm::dvec2 Layout::fileGridFrameSize(const Graph &graph, const std::vector<int> 
     double width = columns * columnWidth + (columns - 1) * nodeGapX + 2 * framePadding;
     if (!nodes.empty())
         width = std::max(width, frameTitleWidth(graph.nodes[nodes.front()].file));
-    return glm::dvec2(width, rows * nodeHeight() + (rows - 1) * nodeGapY + 2 * framePadding + frameHeaderHeight());
+    return glm::dvec2(width, rows * nodeHeight() + (rows - 1) * nodeGapY + 2 * framePadding + frameHeaderHeight);
 }
 
 // Раскладка блоков файла сеткой от левого верхнего угла рамки: типы сверху, дальше по строкам определения
@@ -148,7 +148,7 @@ void Layout::placeFileGrid(const Graph &graph, std::vector<int> nodes, glm::dvec
         int column = i / rows;
         int row = i % rows;
         nodePositions[graph.nodes[nodes[i]].id] = frameTopLeft + glm::dvec2(framePadding + column * (columnWidth + nodeGapX),
-                                                                            frameHeaderHeight() + framePadding + row * (nodeHeight() + nodeGapY));
+                                                                            frameHeaderHeight + framePadding + row * (nodeHeight() + nodeGapY));
     }
 }
 
@@ -203,7 +203,7 @@ glm::dvec2 Layout::packFiles(const Graph &graph, const std::map<std::wstring, st
         double shelfWidth = std::max(widest, std::sqrt(area) * 1.5);
 
         double inset = isRoot ? 0 : folderPadding;
-        double top = isRoot ? 0 : folderHeaderHeight();
+        double top = isRoot ? 0 : folderHeaderHeight;
         glm::dvec2 cursor(inset, top + inset);
         double rowHeight = 0;
         double contentWidth = 0;
@@ -543,8 +543,8 @@ int Layout::separate(const Graph &graph, const std::set<std::string> &pinnedIds)
             maximum = glm::max(maximum, item.rect.position + item.rect.size);
             folderNodes.insert(folderNodes.end(), item.nodes.begin(), item.nodes.end());
         }
-        areaRects[folder] = LayoutRect{minimum - glm::dvec2(folderPadding, folderPadding + folderHeaderHeight()),
-                                       maximum - minimum + glm::dvec2(2 * folderPadding, 2 * folderPadding + folderHeaderHeight())};
+        areaRects[folder] = LayoutRect{minimum - glm::dvec2(folderPadding, folderPadding + folderHeaderHeight),
+                                       maximum - minimum + glm::dvec2(2 * folderPadding, 2 * folderPadding + folderHeaderHeight)};
     }
     return movedCount;
 }

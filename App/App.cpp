@@ -406,13 +406,10 @@ void App::createSettingsWindow() {
     };
 
     addSection(L"ХОЛСТ");
-    addRow(L"Имя файла", L"Высота имени файла вблизи, единицы холста (при масштабе 1 - пиксели); полоса имени растёт вместе с ним",
-           12, 120, 1, []() {return settings().fileTitleSize;}, [](double value) {settings().fileTitleSize = value;}, whole, true);
-    addRow(L"Имя файла издали", L"Высота имени файла на дальнем виде, пиксели экрана", 10, 60, 1, []() {return settings().fileFarSize;}, [](double value) {settings().fileFarSize = value;}, whole);
-    addRow(L"Имя папки", L"Высота имени папки верхнего уровня вблизи, единицы холста (вложенные мельче)",
-           12, 80, 1, []() {return settings().folderTitleSize;}, [](double value) {settings().folderTitleSize = value;}, whole, true);
-    addRow(L"Имя папки издали", L"Высота имени папки верхнего уровня на дальнем виде, пиксели экрана",
-           10, 48, 1, []() {return settings().folderFarSize;}, [](double value) {settings().folderFarSize = value;}, whole);
+    addRow(L"Имя файла", L"Высота имени файла, пиксели экрана - при любом масштабе; налезающие друг на друга имена мелких рамок не пишутся",
+           10, 60, 1, []() {return settings().fileLabelSize;}, [](double value) {settings().fileLabelSize = value;}, whole);
+    addRow(L"Имя папки", L"Высота имени папки верхнего уровня, пиксели экрана - при любом масштабе (вложенные мельче)",
+           10, 60, 1, []() {return settings().folderLabelSize;}, [](double value) {settings().folderLabelSize = value;}, whole);
     addRow(L"Имя в блоке", L"Высота имени функции или типа, единицы холста; блок растёт вместе с ним",
            9, 32, 1, []() {return settings().nodeTextSize;}, [](double value) {settings().nodeTextSize = value;}, whole, true);
     addRow(L"Текст пометки", L"Высота текста пометок, единицы холста", 9, 40, 1, []() {return settings().noteTextSize;}, [](double value) {settings().noteTextSize = value;}, whole);
@@ -428,8 +425,8 @@ void App::createSettingsWindow() {
            [](double value) {return value < 0.5 ? std::wstring(L"авто") : std::to_wstring(int(std::lround(value)));});
 
     y += 6;
-    for (const std::wstring &line : wrapText(L"Рамки, налезшие друг на друга от крупных имён, расступаются сами. «Разложить заново» - вся карта "
-                                             L"с нуля (Ctrl+Z - вернуть как было).", 50)) {
+    for (const std::wstring &line : wrapText(L"Блоки, налезшие друг на друга от крупного имени в блоке, расступаются сами. «Разложить заново» - "
+                                             L"вся карта с нуля (Ctrl+Z - вернуть как было).", 50)) {
         auto *hint = new vgui::Label(vgui::MySize<double>(windowWidth - 2 * left, 20), glm::dvec2(left, y), fixedSize, inParent, glm::dvec2(0, 0), line);
         hint->setFontSize(12);
         hint->setTextColor(mutedColor);

@@ -106,8 +106,10 @@ private:
     CanvasLayer areaLayer;    // Области папок, рамки файлов, их подписи
     CanvasLayer edgeLayer;    // Связи
     CanvasLayer nodeLayer;    // Блоки и их имена
-    CanvasLayer overlayLayer; // Номера вызовов, пометки, крупные подписи дальнего вида
+    CanvasLayer labelLayer;   // Имена папок и файлов (одного размера на экране)
+    CanvasLayer overlayLayer; // Номера вызовов, пометки
     bool isSceneDirty = true;
+    double labelsZoom = -1;   // Масштаб, под который собраны имена
     glm::ivec2 viewport{1, 1};
     glm::dvec4 viewInsets{0, 0, 0, 0};
 
@@ -122,14 +124,16 @@ private:
         LayoutRect rect;
         std::vector<int> nodes;
         int colorIndex = 0;
-        float farLabelAppearZoom = 1e9f; // С какого масштаба видна дальняя подпись (помещается в ширину)
+        float labelWidth = 0;                  // Ширина имени на экране, пиксели
+        glm::dvec2 labelOffset{-1, -1};        // Левый край и середина имени от угла рамки, пиксели; -1 - имя не пишется (налезло на другое)
     };
     struct FolderArea {
         std::wstring path;
         LayoutRect rect;
         int depth = 1;
         int colorIndex = 0;
-        float farLabelAppearZoom = 1e9f;
+        float labelWidth = 0;
+        glm::dvec2 labelOffset{-1, -1};
     };
     std::vector<FileFrame> frames;
     std::vector<FolderArea> folders;
@@ -163,15 +167,17 @@ private:
     void rebuildGeometry();
     // Слои рисования
     void buildScene();
+    // Имена папок и файлов под текущий масштаб
+    void buildLabels();
     // Связь кривой от узла к узлу; badge - номер вызова у дальнего от выбранного конца (0 - без номера)
     void addEdge(int fromNode, int toNode, EdgeKind kind, bool isHighlighted, int badge, bool isBadgeAtTarget);
 
-    // Что под точкой холста: узел, пометка, полоса имени файла, полоса имени папки (-1 - ничего). Издали полоса имени выше -
-    // под дальнюю подпись; isFarLabelOnly - только когда дальняя подпись видна
+    // Что под точкой холста: узел, пометка, полоса имени файла, полоса имени папки (-1 - ничего); isLabelOnly - только само имя
+    // (оно поверх блоков и берётся первым), иначе - имя или полоса имени
     int hitNode(glm::dvec2 world) const;
     int hitNote(glm::dvec2 world) const;
-    int hitFrameHeader(glm::dvec2 world, bool isFarLabelOnly) const;
-    int hitFolderHeader(glm::dvec2 world, bool isFarLabelOnly) const;
+    int hitFrameHeader(glm::dvec2 world, bool isLabelOnly) const;
+    int hitFolderHeader(glm::dvec2 world, bool isLabelOnly) const;
 
     // Начать перетаскивание узлов: запомнить их места
     void beginNodesDrag(const std::vector<int> &nodes);
