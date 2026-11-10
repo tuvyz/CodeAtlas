@@ -56,7 +56,6 @@ public:
     static double frameTitleSize() {return settings().fileTitleSize;}            // Высота шрифта имени файла
     static double frameHeaderHeight() {return frameTitleSize() * 1.8;}           // Полоса имени файла над блоками
     static double folderTitleSize() {return settings().folderTitleSize;}         // Высота шрифта имени папки верхнего уровня
-    static double folderHeaderHeight() {return folderTitleSize() * 1.8;}         // Полоса имени папки
 
     std::map<std::string, glm::dvec2> nodePositions; // Левый верхний угол блока по id узла
     std::vector<LayoutNote> notes;
@@ -97,8 +96,11 @@ public:
     static double frameTitleWidth(const std::wstring &file);
     // Высота имени папки глубины depth (1 - верхний уровень, вложенные мельче)
     static double folderTitleSizeAt(int depth);
-    // Наименьшая ширина области папки глубины depth: имя папки (последняя часть пути) целиком с отступами
-    static double folderTitleWidth(const std::wstring &path, int depth);
+    // Размер имени папки глубины depth (последняя часть пути): ширина по знакам моноширинного шрифта, высота - с выносными элементами
+    static glm::dvec2 folderTitleBox(const std::wstring &path, int depth);
+    // Область папки по местам её содержимого (рамки файлов, области подпапок): с отступом, имя - в левом верхнем углу без своей полосы,
+    // содержимое справа от имени - на той же высоте; где содержимое под именем, область выше - имя встаёт над ним. Не уже имени
+    static LayoutRect folderArea(const std::vector<LayoutRect> &children, const std::wstring &path, int depth);
 
 private:
     // Блок, рамка или область при раздвигании: место, закреплено ли, узлы под ним, итоговый сдвиг

@@ -103,21 +103,9 @@ void MapView::rebuildGeometry() {
             frames.push_back(frame);
     }
 
-    // Области папок до Layout::maxFolderDepth уровня: рамки своих файлов и области подпапок с отступом и полосой имени, снизу вверх
-    std::map<std::wstring, LayoutRect> rawAreas;   // Без отступов: рамки файлов и области подпапок
-    std::map<std::wstring, bool> hasRawArea;
+    // Области папок до Layout::maxFolderDepth уровня: рамки своих файлов и области подпапок с отступом и именем, снизу вверх
+    std::map<std::wstring, std::vector<LayoutRect>> childRects;
     std::map<std::wstring, int> areaColors;
-    auto unite = [&](const std::wstring &path, const LayoutRect &rect) {
-        LayoutRect &target = rawAreas[path];
-        if (!hasRawArea[path]) {
-            target = rect;
-            hasRawArea[path] = true;
-            return;
-        }
-        glm::dvec2 minimum = glm::min(target.position, rect.position);
-        glm::dvec2 maximum = glm::max(target.position + target.size, rect.position + rect.size);
-        target = LayoutRect{minimum, maximum - minimum};
-    };
     for (const FileFrame &frame : frames) {
         std::wstring parent = std::filesystem::path(frame.file).parent_path().generic_wstring();
         std::wstring folder;
@@ -130,31 +118,28 @@ void MapView::rebuildGeometry() {
             ++depth;
             start = slash == std::wstring::npos ? parent.size() : slash + 1;
             areaColors[folder] = frame.colorIndex;
-            hasRawArea.emplace(folder, false);
+            childRects[folder];
         }
         if (!folder.empty())
-            unite(folder, frame.rect);
+            childRects[folder].push_back(frame.rect);
     }
     std::vector<std::wstring> paths;
-    for (const auto &[path, hasArea] : hasRawArea)
+    for (const auto &[path, rects] : childRects)
         paths.push_back(path);
     auto depthOf = [](const std::wstring &path) {return int(std::count(path.begin(), path.end(), L'/')) + 1;};
     std::sort(paths.begin(), paths.end(), [&](const std::wstring &first, const std::wstring &second) {return depthOf(first) > depthOf(second);});
     for (const std::wstring &path : paths) {
-        if (!hasRawArea[path])
+        if (childRects[path].empty())
             continue;
-        LayoutRect raw = rawAreas[path];
         FolderArea area;
         area.path = path;
         area.depth = depthOf(path);
         area.colorIndex = areaColors[path];
-        area.rect = LayoutRect{raw.position - glm::dvec2(Layout::folderPadding, Layout::folderPadding + Layout::folderHeaderHeight()),
-                               raw.size + glm::dvec2(2 * Layout::folderPadding, 2 * Layout::folderPadding + Layout::folderHeaderHeight())};
-        area.rect.size.x = std::max(area.rect.size.x, Layout::folderTitleWidth(path, area.depth));
+        area.rect = Layout::folderArea(childRects[path], path, area.depth);
         folders.push_back(area);
         size_t slash = path.rfind(L'/');
         if (slash != std::wstring::npos)
-            unite(path.substr(0, slash), area.rect);
+            childRects[path.substr(0, slash)].push_back(area.rect);
     }
     std::sort(folders.begin(), folders.end(), [](const FolderArea &first, const FolderArea &second) {return first.depth < second.depth;});
 }
@@ -276,7 +261,7 @@ void MapView::buildScene() {
     }
     bool isFading = selectedNode >= 0;
 
-    // Области папок: заливка цветом папки верхнего уровня, имя в полосе сверху. Имена папок и файлов - размером холста при любом
+    // Области папок: заливка цветом папки верхнего уровня, имя в левом верхнем углу. Имена папок и файлов - размером холста при любом
     // масштабе: карта масштабируется целиком, как одна картинка
     for (const FolderArea &area : folders) {
         glm::vec4 accent = folderAccent(area.colorIndex);
@@ -284,7 +269,7 @@ void MapView::buildScene() {
         glm::vec4 border = glm::mix(paperColor, accent, 0.32f);
         areaLayer.shapes.push_back(boxShape(area.rect, ShapeKind::RoundBox, 16, fill, border, 1));
         float titleSize = float(Layout::folderTitleSizeAt(area.depth));
-        glm::vec2 titlePosition = glm::vec2(area.rect.position) + glm::vec2(18, float(Layout::folderHeaderHeight()) * 0.5f + 2);
+        glm::vec2 titlePosition = glm::vec2(area.rect.position) + glm::vec2(float(Layout::folderPadding), float(Layout::folderPadding) + titleSize * 0.5f);
         font.addText(areaLayer, lastPathPart(area.path), titlePosition, titleSize, glm::mix(accent, glm::vec4(0, 0, 0, 1), 0.28f));
     }
 
@@ -785,7 +770,7 @@ MapView::NodeLinks MapView::linksOf(int nodeIndex) const {
 }
 
 
-// Что под точкой холста: узел, пометка, полоса имени файла, полоса имени папки (-1 - ничего)
+// Что под точкой холста: узел, пометка, полоса имени файла, имя папки (-1 - ничего)
 int MapView::hitNode(glm::dvec2 world) const {
     for (int nodeIndex = int(nodeRects.size()) - 1; nodeIndex >= 0; --nodeIndex) {
         if (nodeRects[nodeIndex].size.x > 0 && nodeRects[nodeIndex].contains(world))
@@ -815,7 +800,8 @@ int MapView::hitFrameHeader(glm::dvec2 world) const {
 int MapView::hitFolderHeader(glm::dvec2 world) const {
     int found = -1;
     for (int folderIndex = 0; folderIndex < int(folders.size()); ++folderIndex) {
-        LayoutRect header{folders[folderIndex].rect.position, glm::dvec2(folders[folderIndex].rect.size.x, Layout::folderHeaderHeight())};
+        glm::dvec2 titleBox = Layout::folderTitleBox(folders[folderIndex].path, folders[folderIndex].depth);
+        LayoutRect header{folders[folderIndex].rect.position, titleBox + glm::dvec2(2 * Layout::folderPadding, Layout::folderPadding * 1.5)};
         if (header.contains(world) && (found < 0 || folders[folderIndex].depth > folders[found].depth))
             found = folderIndex;
     }
