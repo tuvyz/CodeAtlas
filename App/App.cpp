@@ -668,8 +668,8 @@ void App::openProject(const std::wstring &root) {
         statusLabel->setText(L"Нет такой папки: " + root);
         return;
     }
-    if (jobKind == JobKind::Scan || jobKind == JobKind::GitCommand) {
-        statusLabel->setText(jobKind == JobKind::Scan ? L"Идёт сканирование - сначала остановить" : L"Идёт команда git - дождаться её");
+    if (jobKind == JobKind::GitCommand) {
+        statusLabel->setText(L"Идёт команда git - дождаться её");
         return;
     }
 
@@ -680,6 +680,7 @@ void App::openProject(const std::wstring &root) {
         jobThread.join();
         jobKind = JobKind::None;
         scanProgress->setVisible(false);
+        scanButton->setText(L"Сканировать");
     }
     saveLayout();
 
@@ -759,7 +760,7 @@ void App::openProject(const std::wstring &root) {
         mapView.fitAll(true);
     }
     if (shownGraph.nodes.empty()) {
-        statusLabel->setText(hasTemplate ? L"Карты ещё нет - «Сканировать»" : L"Нет codeatlas.yaml - общий C++ без компонентов; «Сканировать»");
+        statusLabel->setText(hasTemplate ? L"Карты ещё нет - разбор проекта" : L"Нет codeatlas.yaml - общий C++ без компонентов; разбор проекта");
         updateComparison();
     }
     mapView.invalidate();
@@ -937,9 +938,9 @@ void App::startNextJob() {
         if (std::filesystem::exists(statePath, errorCode)) {
             next = JobKind::LoadState;
         } else {
+            // Разбора по файлам нет (новый проект, карта старой версии) - проект разбирается сам
             isScanStateLoaded = true;
-            if (!shownGraph.nodes.empty())
-                statusLabel->setText(L"Слежение за правками и сравнение с коммитами - после «Сканировать»");
+            next = JobKind::Scan;
         }
     } else if (isRefreshRequested && !scanState.files.empty()) {
         next = JobKind::Refresh;
@@ -1645,7 +1646,7 @@ void App::rebuildDetails() {
         addLabel(L"Карты ещё нет", 18, inkColor);
         y += 8;
         addParagraph(L"1. В CMakeLists.txt проекта: set(CMAKE_EXPORT_COMPILE_COMMANDS ON) и собрать (Ninja или Makefile) - появится "
-                     L"compile_commands.json в папке сборки.\n2. Открыть папку проекта и нажать «Сканировать». Папку сборки CodeAtlas ищет сам; "
+                     L"compile_commands.json в папке сборки.\n2. Открыть проект - CodeAtlas разберёт его сам. Папку сборки он ищет сам; "
                      L"не нашёл - указать её compile_commands.json кнопкой «Открыть».\n3. По желанию в корне проекта codeatlas.yaml: исключения, "
                      L"вызовы компонентов (docs/PROJECT_TEMPLATE.md).\n\nРаскладка и разбор хранятся у CodeAtlas (Projects рядом с программой), "
                      L"в проект ничего не пишется.", 14, inkColor);
@@ -2040,8 +2041,6 @@ int App::run(const std::wstring &projectRoot) {
             // Граф прежнего выбора больше не нужен - не ждать его
             if (jobKind == JobKind::CommitGraph && jobCommit != compareCommit && jobCommit != headCommit)
                 analyzer.isStopRequested = true;
-            if (isScanStateLoaded && scanState.files.empty())
-                statusLabel->setText(L"Сравнение с коммитами - после «Сканировать»: старая карта не хранит разбор по файлам");
         }
         checkChanges();
         pollJob();
