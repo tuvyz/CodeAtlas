@@ -31,6 +31,7 @@ public:
     std::atomic<int> unitsDone = 0;
     std::atomic<int> unitsWithErrors = 0;
     std::atomic<bool> isStopRequested = false;
+    int threadsCount = 0; // Потоков разбора (0 - половина ядер, не больше 8)
 
     // Сканирование проекта по compile_commands.json; error - причина, если не вышло
     bool scan(const ProjectTemplate &project, Graph &graph, std::wstring &error);

@@ -678,7 +678,8 @@ bool Analyzer::scan(const ProjectTemplate &project, Graph &graph, std::wstring &
             unit.arguments.push_back("-resource-dir");
             unit.arguments.push_back(resourceDir);
         }
-        // Обычные комментарии тоже привязываются к объявлениям; предупреждения не нужны
+        // Обычные комментарии тоже привязываются к объявлениям (через -Xclang: clang-cl флаг -fparse-all-comments молча пропускает); предупреждения не нужны
+        unit.arguments.push_back("-Xclang");
         unit.arguments.push_back("-fparse-all-comments");
         unit.arguments.push_back("-Wno-everything");
         units.push_back(unit);
@@ -704,14 +705,14 @@ bool Analyzer::scan(const ProjectTemplate &project, Graph &graph, std::wstring &
     shared.project = &project;
     shared.componentCalls = std::set<std::string>(project.componentCalls.begin(), project.componentCalls.end());
     shared.writeCalls = std::set<std::string>(project.writeCalls.begin(), project.writeCalls.end());
-    // Потоков - половина ядер, не больше 8: единица с тяжёлыми заголовками держит в libclang сотни мегабайт, и окну нужен свой проц
+    // Потоков по умолчанию - половина ядер, не больше 8: единица с тяжёлыми заголовками держит в libclang сотни мегабайт, и окну нужен свой проц
     constexpr int maxThreads = 8;
-    int threadsCount = std::clamp(int(std::thread::hardware_concurrency()) / 2, 1, maxThreads);
-    threadsCount = std::min(threadsCount, int(units.size()));
-    std::vector<WorkerResult> results(threadsCount);
+    int workersCount = threadsCount > 0 ? threadsCount : std::clamp(int(std::thread::hardware_concurrency()) / 2, 1, maxThreads);
+    workersCount = std::max(1, std::min(workersCount, int(units.size())));
+    std::vector<WorkerResult> results(workersCount);
     std::atomic<int> nextUnit = 0;
     std::vector<std::thread> threads;
-    for (int threadIndex = 0; threadIndex < threadsCount; ++threadIndex) {
+    for (int threadIndex = 0; threadIndex < workersCount; ++threadIndex) {
         threads.emplace_back([&, threadIndex]() {
 #ifdef _WIN32
             SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
