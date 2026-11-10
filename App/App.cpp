@@ -1180,6 +1180,14 @@ void App::pollJob() {
             scanState = std::move(jobState);
         else
             isScanRequested = true;
+
+        // В разборе есть файлы, которые теперь исключены (чужой код, exclude в шаблоне), - граф собирается заново без них
+        for (const auto &[file, fileScan] : scanState.files) {
+            if (project.projectRelativePath((std::filesystem::path(project.root) / file).wstring()).empty()) {
+                isRefreshRequested = true;
+                break;
+            }
+        }
         Debug() << "CodeAtlas: разобранное загружено, файлов" << scanState.files.size() << "за" << seconds << "с";
         break;
 

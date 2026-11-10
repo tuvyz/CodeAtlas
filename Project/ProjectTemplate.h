@@ -3,6 +3,7 @@
 
 #include <string>
 #include <vector>
+#include <set>
 #include <fstream>
 #include <filesystem>
 #include <cstdio>
@@ -18,7 +19,7 @@ struct ProjectTemplate {
     std::wstring root;                       // Корень проекта (папка с codeatlas.yaml)
     std::wstring name;                       // Имя проекта на карте
     std::wstring compileCommandsDir;         // Папка с compile_commands.json, от корня проекта
-    std::vector<std::wstring> exclude;       // Папки от корня, которые на карту не попадают
+    std::vector<std::wstring> exclude;       // Папки от корня, которые на карту не попадают: из codeatlas.yaml и чужой код (библиотеки), найденный сам
     std::vector<std::string> componentCalls; // Вызовы, чей шаблонный аргумент - компонент (view, get, emplace и т.п.)
     std::vector<std::string> writeCalls;     // Из них - запись в компонент (emplace, remove и т.п.), остальные - чтение
     std::string eventRegex;                  // Компонент с таким именем - событие

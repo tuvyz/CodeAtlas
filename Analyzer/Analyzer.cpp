@@ -1432,8 +1432,17 @@ bool Analyzer::update(const ProjectTemplate &project, ScanState &state, const st
     replacedFiles.insert(newIncludes.begin(), newIncludes.end());
     distributeResults(results, &replacedFiles, state);
 
-    // На диске - новое время правки заменённых файлов и новых подключённых; удалённые с диска из слежения уходят
+    // На диске - новое время правки заменённых файлов и новых подключённых; удалённые с диска из слежения уходят, исключённые после
+    // прошлого разбора (чужой код, exclude в шаблоне) - и из разобранного
     if (isDisk) {
+        for (auto iterator = state.files.begin(); iterator != state.files.end();) {
+            if (project.projectRelativePath((root / iterator->first).wstring()).empty()) {
+                state.fileTimes.erase(iterator->first);
+                iterator = state.files.erase(iterator);
+            } else {
+                ++iterator;
+            }
+        }
         for (const std::wstring &file : replacedFiles) {
             auto before = timesBefore.find(file);
             int64_t time = before != timesBefore.end() ? before->second : fileWriteTime(root / file);
@@ -1455,7 +1464,11 @@ bool Analyzer::update(const ProjectTemplate &project, ScanState &state, const st
 void Analyzer::buildGraph(const ProjectTemplate &project, const ScanState &state, const FileVersions &versions, Graph &graph) {
     graph.clear();
     std::set<std::string> componentTypeIds;
+    std::filesystem::path root(project.root);
     for (const auto &[file, fileScan] : state.files) {
+        // Файл, исключённый после разбора (чужой код, exclude в шаблоне), на карту не идёт
+        if (project.projectRelativePath((root / file).wstring()).empty())
+            continue;
         for (const GraphNode &node : fileScan.nodes)
             graph.addNode(node);
         for (const PendingComponent &component : fileScan.components)

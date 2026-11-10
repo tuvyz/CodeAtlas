@@ -28,6 +28,40 @@ bool ProjectTemplate::load(const std::wstring &projectRoot) {
         projectFile << wstringToString(root) << '\n';
     }
 
+    // Чужой код на карту не идёт, как exclude: папки библиотек по имени (Libs, third_party и т.п.) и папки со своей лицензией или своим .git
+    // (скопированная библиотека, подмодуль); корень проекта - не в счёт
+    static const std::set<std::wstring> libraryFolderNames = {L"libs", L"third_party", L"thirdparty", L"3rdparty", L"external", L"extern",
+                                                              L"vendor", L"deps"};
+    std::error_code errorCode;
+    for (auto entry = std::filesystem::recursive_directory_iterator(std::filesystem::path(root), std::filesystem::directory_options::skip_permission_denied,
+                                                                    errorCode);
+         entry != std::filesystem::recursive_directory_iterator(); entry.increment(errorCode)) {
+        if (errorCode)
+            break;
+        if (!entry->is_directory(errorCode))
+            continue;
+        std::filesystem::path folder = entry->path();
+        std::wstring folderName = folder.filename().wstring();
+        for (wchar_t &character : folderName)
+            character = wchar_t(std::towlower(character));
+        if (folderName.rfind(L'.', 0) == 0 || std::filesystem::exists(folder / "CMakeCache.txt", errorCode)) {
+            entry.disable_recursion_pending();
+            continue;
+        }
+        bool isForeign = libraryFolderNames.count(folderName) > 0 || std::filesystem::exists(folder / ".git", errorCode);
+        for (std::filesystem::directory_iterator inner(folder, errorCode); !isForeign && !errorCode && inner != std::filesystem::directory_iterator();
+             inner.increment(errorCode)) {
+            std::wstring fileName = inner->path().filename().wstring();
+            for (wchar_t &character : fileName)
+                character = wchar_t(std::towlower(character));
+            isForeign = fileName.rfind(L"license", 0) == 0 || fileName.rfind(L"licence", 0) == 0 || fileName.rfind(L"copying", 0) == 0;
+        }
+        if (isForeign) {
+            exclude.push_back(folder.lexically_relative(std::filesystem::path(root)).generic_wstring());
+            entry.disable_recursion_pending();
+        }
+    }
+
     std::ifstream file(std::filesystem::path(root) / "codeatlas.yaml");
     if (!file)
         return false;
