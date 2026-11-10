@@ -21,13 +21,20 @@
 - Правая кнопка: на пустом месте - пометка, вся карта, разложить заново; на блоке - вид, скопировать имя или файл:строку; на пометке - изменить, удалить
 - Поиск сверху - подсветка по имени, Enter - к следующему найденному; F5 - сканировать
 
+## Перед сборкой: LLVM
+
+Код разбирает libclang - библиотека парсера C++ из компилятора clang (проект [LLVM](https://llvm.org)). В репозиторий она не положена: её dll весит под сотню мегабайт. Её надо поставить один раз:
+
+- Windows: со страницы [выпусков LLVM](https://github.com/llvm/llvm-project/releases/latest) скачать установщик `LLVM-<версия>-win64.exe` и поставить в папку по умолчанию `C:/Program Files/LLVM` (другую папку указать при сборке: `-DCODEATLAS_LLVM_DIR=...`). Добавлять LLVM в PATH не нужно. Сборку своих проектов на MSVC он не трогает.
+- Linux: `apt install libclang-18-dev` (или новее, путь - `-DCODEATLAS_LLVM_DIR=/usr/lib/llvm-<версия>`).
+
+Нужна версия 17 или новее.
+
 ## Сборка
 
-C++20, CMake. Зависимости: SDL2, GLEW, FreeType, glm, fmt (лежат в Libs для Windows), libclang (LLVM), интерфейс - [VisorGUI](https://github.com/tuvyz/VisorGUI) (копия в Libs/VisorGUI).
+C++20, CMake. Остальные зависимости: SDL2, GLEW, FreeType, glm, fmt (для Windows лежат в Libs), интерфейс - [VisorGUI](https://github.com/tuvyz/VisorGUI) (копия в Libs/VisorGUI).
 
-Windows (MSVC, Qt Creator или Visual Studio):
-1. Поставить LLVM (https://github.com/llvm/llvm-project/releases, `LLVM-<версия>-win64.exe`), по умолчанию в `C:/Program Files/LLVM`; другой путь - `-DCODEATLAS_LLVM_DIR=...`.
-2. Собрать CMake-проект; рядом с exe копируются SDL2.dll и libclang.dll.
+Windows (MSVC, Qt Creator или Visual Studio): поставить LLVM (выше) и собрать CMake-проект; рядом с exe копируются SDL2.dll и libclang.dll.
 
 Linux: `apt install libsdl2-dev libglew-dev libfreetype-dev libclang-18-dev`, потом
 ```
