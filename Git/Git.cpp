@@ -79,6 +79,26 @@ std::string Git::resolve(const std::wstring &projectRoot, const std::string &nam
 }
 
 
+// Ветка, за которой следит текущая (origin/master и т.п.); пусто - не задана
+std::string Git::upstream(const std::wstring &projectRoot) {
+    std::string output;
+    if (!run(projectRoot, L"rev-parse --abbrev-ref --symbolic-full-name @{u}", output, false))
+        return std::string();
+    while (!output.empty() && (output.back() == '\n' || output.back() == '\r'))
+        output.pop_back();
+    return output;
+}
+
+
+// Сколько коммитов текущей ветки ещё не отправлено в неё; -1 - ветка для отправки не задана
+int Git::aheadCount(const std::wstring &projectRoot) {
+    std::string output;
+    if (!run(projectRoot, L"rev-list --count @{u}..HEAD", output, false) || output.empty())
+        return -1;
+    return std::atoi(output.c_str());
+}
+
+
 // Последние коммиты текущей ветки, новые первыми
 std::vector<GitCommit> Git::listCommits(const std::wstring &projectRoot, int maxCount) {
     std::vector<GitCommit> commits;

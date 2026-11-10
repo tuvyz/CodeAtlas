@@ -39,6 +39,12 @@ public:
     // Хэш коммита по имени (HEAD, HEAD~1, хэш); пусто - нет такого
     static std::string resolve(const std::wstring &projectRoot, const std::string &name);
 
+    // Ветка, за которой следит текущая (origin/master и т.п.); пусто - не задана
+    static std::string upstream(const std::wstring &projectRoot);
+
+    // Сколько коммитов текущей ветки ещё не отправлено в неё; -1 - ветка для отправки не задана
+    static int aheadCount(const std::wstring &projectRoot);
+
     // Последние коммиты текущей ветки, новые первыми
     static std::vector<GitCommit> listCommits(const std::wstring &projectRoot, int maxCount);
 

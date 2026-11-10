@@ -53,7 +53,9 @@ private:
     std::wstring gitDir;
     std::string headCommit;
     std::string previousCommit;
-    int64_t headLogTime = 0;                   // Время правки журнала HEAD (.git/logs/HEAD): сменилось - HEAD сдвинулся
+    int64_t headLogTime = 0;                   // Время правки HEAD и журналов HEAD и ветки отправки: сменилось - HEAD или ветка отправки сдвинулись
+    std::string upstreamRef;                   // Ветка, за которой следит текущая (origin/master), пусто - не задана
+    int aheadCount = -1;                       // Неотправленных коммитов (-1 - ветки для отправки нет)
     std::string compareTarget = "previous";    // С чем сравнивать: previous - прошлый коммит (следует за HEAD), иначе хэш
     std::string beforePullCommit;              // HEAD до последнего pull, который принёс коммиты
     std::string compareCommit;                 // Хэш, с которым сравнивается карта сейчас (пусто - не с чем)
@@ -120,6 +122,7 @@ private:
     vgui::ScrollAreaWidget *gitBar = nullptr;
     vgui::LineEdit *commitEdit = nullptr;
     vgui::Button *commitButton = nullptr;
+    vgui::Button *pushButton = nullptr;
     vgui::Button *compareButton = nullptr;
     vgui::CheckBox *diffCheck = nullptr;
     vgui::ScrollAreaWidget *commitListWindow = nullptr;
@@ -177,6 +180,10 @@ private:
     void waitChangeCheck();
     // Команда git из полосы снизу
     void requestGitCommand(GitCommand command);
+    // Кнопки git: коммит - только с сообщением, push - только когда есть неотправленные коммиты
+    void updateGitButtons();
+    // HEAD, прошлый коммит, ветка отправки и неотправленные коммиты - заново из git
+    void readGitHead();
     // Окно вывода git (ошибка pull, коммита, push) с кнопкой терминала
     void showGitOutput(const std::wstring &title, const std::string &output);
     // Список коммитов для сравнения над полосой снизу

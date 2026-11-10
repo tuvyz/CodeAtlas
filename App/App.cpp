@@ -326,7 +326,7 @@ void App::createGui() {
         return button;
     };
     addGitButton(14, 76, L"Pull", L"git pull; карта сама пересканирует пришедшие правки и сравнится с тем, что было до pull", GitCommand::Pull);
-    addGitButton(96, 76, L"Push", L"git push", GitCommand::Push);
+    pushButton = addGitButton(96, 76, L"Push", L"git push; нечего отправлять - кнопка недоступна", GitCommand::Push);
 
     auto *commitTitle = new vgui::Label(vgui::MySize<double>(70, 30), glm::dvec2(190, 14), fixedSize, inParent, glm::dvec2(0, 0), L"Коммит");
     commitTitle->setFontSize(13);
@@ -336,8 +336,12 @@ void App::createGui() {
     commitEdit = new vgui::LineEdit(vgui::MySize<double>(300, 34), glm::dvec2(256, 12), fixedSize, inParent);
     commitEdit->setToolTip(L"Сообщение коммита; Enter или «Закоммитить всё» - git add -A и commit");
     gitBar->addChild(commitEdit);
+    commitEdit->eventManager().subscribe<vgui::LineEdit::TextChanged_Event>(this, [this](const vgui::LineEdit::TextChanged_Event &) {
+        updateGitButtons();
+    });
 
-    commitButton = addGitButton(562, 170, L"Закоммитить всё", L"git add -A (всё, что не в .gitignore) и commit с сообщением слева", GitCommand::Commit);
+    commitButton = addGitButton(562, 170, L"Закоммитить всё", L"git add -A (всё, что не в .gitignore) и commit с сообщением слева; без сообщения недоступна",
+                                GitCommand::Commit);
 
     auto *compareTitle = new vgui::Label(vgui::MySize<double>(100, 30), glm::dvec2(-554, 14), fixedSize, inParent, glm::dvec2(0, 0), L"Сравнить с");
     compareTitle->setFontSize(13);
@@ -721,13 +725,13 @@ void App::openProject(const std::wstring &root) {
     gitDir = Git::gitDir(project.root);
     headCommit.clear();
     previousCommit.clear();
+    upstreamRef.clear();
+    aheadCount = -1;
     headLogTime = 0;
     compareTarget = "previous";
     beforePullCommit.clear();
     if (!gitDir.empty()) {
-        headCommit = Git::resolve(project.root, "HEAD");
-        previousCommit = Git::resolve(project.root, "HEAD~1");
-        headLogTime = fileTime(std::filesystem::path(gitDir) / "logs" / "HEAD") + fileTime(std::filesystem::path(gitDir) / "HEAD");
+        readGitHead();
         std::ifstream choice(dataDir / "git.txt", std::ios::binary);
         std::string line;
         while (std::getline(choice, line)) {
@@ -739,6 +743,7 @@ void App::openProject(const std::wstring &root) {
         }
     }
     gitBar->setVisible(!gitDir.empty());
+    updateGitButtons();
     commitListWindow->setVisible(false);
     gitOutputWindow->setVisible(false);
 
@@ -1184,8 +1189,11 @@ void App::pollJob() {
         break;
     }
 
-    // Правки и HEAD - сразу (после pull и коммита они точно сменились)
+    // Правки и HEAD - сразу (после pull и коммита они точно сменились), кнопки git - по итогу
     lastChangeCheckTime = -1;
+    if (finishedKind == JobKind::GitCommand)
+        readGitHead();
+    updateGitButtons();
 }
 
 
@@ -1211,15 +1219,15 @@ void App::checkChanges() {
         return;
     lastChangeCheckTime = now;
 
-    // HEAD сдвинулся (коммит, pull, checkout): прошлый коммит и сравнение - заново
+    // HEAD или ветка отправки сдвинулись (коммит, pull, push, checkout): прошлый коммит, неотправленное и сравнение - заново
     if (!gitDir.empty()) {
-        int64_t time = fileTime(std::filesystem::path(gitDir) / "logs" / "HEAD") + fileTime(std::filesystem::path(gitDir) / "HEAD");
+        std::filesystem::path logs = std::filesystem::path(gitDir) / "logs";
+        int64_t time = fileTime(logs / "HEAD") + fileTime(std::filesystem::path(gitDir) / "HEAD") +
+                       (upstreamRef.empty() ? 0 : fileTime(logs / "refs" / "remotes" / std::filesystem::u8path(upstreamRef)));
         if (time != headLogTime) {
-            headLogTime = time;
-            std::string head = Git::resolve(project.root, "HEAD");
-            if (head != headCommit) {
-                headCommit = head;
-                previousCommit = Git::resolve(project.root, "HEAD~1");
+            std::string oldHead = headCommit;
+            readGitHead();
+            if (headCommit != oldHead) {
                 Debug() << "CodeAtlas: HEAD" << headCommit.substr(0, 7);
                 updateComparison();
             }
@@ -1282,6 +1290,27 @@ void App::requestGitCommand(GitCommand command) {
     requestedGitCommand = command;
     if (jobKind != JobKind::None)
         statusLabel->setText(L"Команда git - после текущей работы");
+}
+
+
+// Кнопки git: коммит - только с сообщением, push - только когда есть неотправленные коммиты
+void App::updateGitButtons() {
+    bool hasMessage = commitEdit->text().find_first_not_of(L" \t") != std::wstring::npos;
+    commitButton->setBlocking(!hasMessage);
+    pushButton->setBlocking(aheadCount == 0);
+}
+
+
+// HEAD, прошлый коммит, ветка отправки и неотправленные коммиты - заново из git
+void App::readGitHead() {
+    headCommit = Git::resolve(project.root, "HEAD");
+    previousCommit = Git::resolve(project.root, "HEAD~1");
+    upstreamRef = Git::upstream(project.root);
+    aheadCount = upstreamRef.empty() ? -1 : Git::aheadCount(project.root);
+    std::filesystem::path logs = std::filesystem::path(gitDir) / "logs";
+    headLogTime = fileTime(logs / "HEAD") + fileTime(std::filesystem::path(gitDir) / "HEAD") +
+                  (upstreamRef.empty() ? 0 : fileTime(logs / "refs" / "remotes" / std::filesystem::u8path(upstreamRef)));
+    updateGitButtons();
 }
 
 
