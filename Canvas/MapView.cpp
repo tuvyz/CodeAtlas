@@ -44,6 +44,13 @@ ShapeInstance boxShape(const LayoutRect &rect, ShapeKind kind, float corner, glm
     return shape;
 }
 
+// Метка правок после последнего коммита: фиолетовая точка в правом верхнем углу блока (scale - масштаб блока, alpha - его прозрачность)
+ShapeInstance uncommittedMark(const LayoutRect &rect, float scale, float alpha) {
+    double radius = 4.5 * scale;
+    LayoutRect dot{rect.position + glm::dvec2(rect.size.x - 13.5 * scale, 7.5 * scale), glm::dvec2(2 * radius)};
+    return boxShape(dot, ShapeKind::RoundBox, float(radius), hexColor(0x8E54CC, alpha), glm::vec4(0), 0);
+}
+
 // Прямоугольник шире на margin со всех сторон
 LayoutRect expanded(const LayoutRect &rect, double margin) {
     return LayoutRect{rect.position - glm::dvec2(margin), rect.size + glm::dvec2(2 * margin)};
@@ -93,12 +100,28 @@ void MapView::rebuildGeometry() {
     for (auto &[name, index] : topFolderColors)
         index = colorIndex++;
 
+    // Призраки удалённых узлов - внутри рамки своего файла (файл ещё есть)
+    std::map<std::wstring, std::vector<LayoutRect>> ghostsOfFile;
+    if (isDiffShown && previousGraph != nullptr) {
+        for (size_t ghostIndex = 0; ghostIndex < removedNodes.size() && ghostIndex < ghostRects.size(); ++ghostIndex) {
+            if (ghostRects[ghostIndex].size.x > 0)
+                ghostsOfFile[previousGraph->nodes[removedNodes[ghostIndex]].file].push_back(ghostRects[ghostIndex]);
+        }
+    }
+
     for (const auto &[file, nodes] : byFile) {
         FileFrame frame;
         frame.file = file;
         frame.nodes = nodes;
         frame.rect = layout->fileFrame(*graph, nodes);
         frame.colorIndex = topFolderColors[topFolder(file)];
+        auto ghosts = ghostsOfFile.find(file);
+        for (size_t i = 0; frame.rect.size.x > 0 && ghosts != ghostsOfFile.end() && i < ghosts->second.size(); ++i) {
+            const LayoutRect &ghost = ghosts->second[i];
+            glm::dvec2 minimum = glm::min(frame.rect.position, ghost.position - glm::dvec2(Layout::framePadding, Layout::framePadding + Layout::frameHeaderHeight()));
+            glm::dvec2 maximum = glm::max(frame.rect.position + frame.rect.size, ghost.position + ghost.size + glm::dvec2(Layout::framePadding));
+            frame.rect = LayoutRect{minimum, maximum - minimum};
+        }
         if (frame.rect.size.x > 0)
             frames.push_back(frame);
     }
@@ -385,6 +408,10 @@ void MapView::buildScene() {
         text.a *= alpha;
         nodeLayer.shapes.push_back(boxShape(rect, shapeKind, corner * scale, fill, border, borderWidth));
 
+        // Правки после последнего коммита - точка в правом верхнем углу
+        if (isUncommittedShown && nodeIndex < int(uncommittedNodes.size()) && uncommittedNodes[nodeIndex])
+            nodeLayer.shapes.push_back(uncommittedMark(rect, scale, alpha));
+
         // Полоска цвета файла у функции
         float textLeft = 12;
         if (node.kind == NodeKind::Function) {
@@ -413,18 +440,19 @@ void MapView::buildScene() {
         }
     }
 
-    // Призраки удалённых узлов: пунктир на старом месте
+    // Призраки удалённых узлов: серые полупрозрачные, пунктиром
     if (isDiffShown && previousGraph != nullptr) {
-        for (int previousIndex : removedNodes) {
-            const GraphNode &node = previousGraph->nodes[previousIndex];
-            auto found = layout->nodePositions.find(node.id);
-            if (found == layout->nodePositions.end())
+        for (int ghostIndex = 0; ghostIndex < int(removedNodes.size()) && ghostIndex < int(ghostRects.size()); ++ghostIndex) {
+            const GraphNode &node = previousGraph->nodes[removedNodes[ghostIndex]];
+            const LayoutRect &rect = ghostRects[ghostIndex];
+            if (rect.size.x <= 0)
                 continue;
-            LayoutRect rect{found->second, Layout::nodeSize(node)};
-            nodeLayer.shapes.push_back(boxShape(rect, ShapeKind::DashedBox, 6, hexColor(0xF4F2ED, 0.6f), hexColor(0xB04848), 1.4f));
             float scale = float(Layout::nodeScale(node));
+            nodeLayer.shapes.push_back(boxShape(rect, ShapeKind::DashedBox, 6 * scale, hexColor(0xDCD9D3, 0.45f), hexColor(0x9E9A93, 0.8f), 1.4f));
+            if (isUncommittedShown && ghostIndex < int(uncommittedGhosts.size()) && uncommittedGhosts[ghostIndex])
+                nodeLayer.shapes.push_back(uncommittedMark(rect, scale, 1));
             font.addText(nodeLayer, node.name, glm::vec2(rect.position) + glm::vec2(12 * scale, float(rect.size.y) * 0.5f), float(Layout::nodeTextSize()) * scale,
-                         hexColor(0xA05A5A));
+                         hexColor(0x8F8B84, 0.85f));
         }
     }
 

@@ -9,7 +9,7 @@ const vgui::SimplePair<vgui::POSITIONING_POLICY> inParent{vgui::ABSOLUTE_PARENT_
 const vgui::SimplePair<vgui::POSITIONING_POLICY> inWindow{vgui::ABSOLUTE_WINDOW_POSITION, vgui::ABSOLUTE_WINDOW_POSITION};
 constexpr double detailsWidth = 380;   // Ширина окна описания
 constexpr double topBarHeight = 56;    // Высота верхней полосы
-constexpr double historyHeight = 58;   // Высота полосы истории
+constexpr double gitBarHeight = 58;    // Высота полосы git
 constexpr double edgeGap = 16;         // Отступ окон от краёв
 
 // Цвета текста интерфейса
@@ -74,6 +74,13 @@ std::wstring lowercase(const std::wstring &text) {
     return result;
 }
 
+// Время правки файла, тики часов файловой системы; 0 - файла нет
+int64_t fileTime(const std::filesystem::path &path) {
+    std::error_code errorCode;
+    std::filesystem::file_time_type time = std::filesystem::last_write_time(path, errorCode);
+    return errorCode ? 0 : int64_t(time.time_since_epoch().count());
+}
+
 // Перенос текста по словам на строки до charsPerLine знаков (слово длиннее строки режется)
 std::vector<std::wstring> wrapText(const std::wstring &text, int charsPerLine) {
     std::vector<std::wstring> lines;
@@ -129,7 +136,7 @@ std::filesystem::path App::resourceDir() {
     return result;
 }
 
-// Файл последнего открытого проекта
+// Файл ранее открытых проектов (последний первым)
 std::filesystem::path App::recentProjectFile() {
     char *prefPath = SDL_GetPrefPath("tuvyz", "CodeAtlas");
     std::filesystem::path result = prefPath != nullptr ? std::filesystem::u8path(prefPath) / "recent.txt" : std::filesystem::path("recent.txt");
@@ -215,16 +222,13 @@ void App::createGui() {
     title->setTextColor(accentColor);
     topBar->addChild(title);
 
-    projectEdit = new vgui::LineEdit(vgui::MySize<double>(430, 34), glm::dvec2(186, 11), fixedSize, inParent);
-    projectEdit->setToolTip(L"Папка проекта: в ней codeatlas.yaml (необязательно) и папка сборки с compile_commands.json");
-    topBar->addChild(projectEdit);
-
-    auto *browseButton = new vgui::Button(vgui::MySize<double>(36, 34), glm::dvec2(622, 11), fixedSize, inParent, glm::dvec2(0, 0), L"…");
-    browseButton->setToolTip(L"CMakeLists.txt или codeatlas.yaml - открыть проект; compile_commands.json - папка сборки открытого проекта");
-    topBar->addChild(browseButton);
-    browseButton->eventManager().subscribe<vgui::Button::Click_Event>(this, [this](const vgui::Button::Click_Event &) {
+    // Открыть проект или указать папку сборки; рядом - ранее открытые проекты
+    auto *openButton = new vgui::Button(vgui::MySize<double>(110, 34), glm::dvec2(186, 11), fixedSize, inParent, glm::dvec2(0, 0), L"Открыть");
+    openButton->setToolTip(L"CMakeLists.txt или codeatlas.yaml - открыть проект; compile_commands.json - папка сборки открытого проекта");
+    topBar->addChild(openButton);
+    openButton->eventManager().subscribe<vgui::Button::Click_Event>(this, [this](const vgui::Button::Click_Event &) {
         vgui::FileDialog dialog;
-        std::wstring path = dialog.openFileName(L"Проект или его сборка", projectEdit->text(),
+        std::wstring path = dialog.openFileName(L"Проект или его сборка", project.root,
                                                 {L"Проект и сборка (CMakeLists.txt, codeatlas.yaml, compile_commands.json)",
                                                  L"CMakeLists.txt;codeatlas.yaml;compile_commands.json", L"Все файлы", L"*.*"});
         if (path.empty())
@@ -239,26 +243,28 @@ void App::createGui() {
             statusLabel->setText(L"Папка сборки: " + chosen.parent_path().generic_wstring());
             return;
         }
-        openProject(chosen.parent_path().generic_wstring());
+        pendingProject = chosen.parent_path().generic_wstring();
     });
 
-    auto *openButton = new vgui::Button(vgui::MySize<double>(100, 34), glm::dvec2(664, 11), fixedSize, inParent, glm::dvec2(0, 0), L"Открыть");
-    topBar->addChild(openButton);
-    openButton->eventManager().subscribe<vgui::Button::Click_Event>(this, [this](const vgui::Button::Click_Event &) {
-        openProject(projectEdit->text());
+    recentCombo = new vgui::ComboBox(vgui::MySize<double>(330, 34), glm::dvec2(302, 11), vgui::FIXED_SIZE, inParent, glm::dvec2(0, 0));
+    topBar->addChild(recentCombo);
+    recentCombo->eventManager().subscribe<vgui::ComboBox::ChangeItem_Event>(this, [this](const vgui::ComboBox::ChangeItem_Event &event) {
+        int index = event.comboBoxItem.id;
+        if (index >= 0 && index < int(recentProjects.size()) && recentProjects[index] != project.root)
+            pendingProject = recentProjects[index];
     });
 
-    scanButton = new vgui::Button(vgui::MySize<double>(136, 34), glm::dvec2(770, 11), fixedSize, inParent, glm::dvec2(0, 0), L"Сканировать");
-    scanButton->setToolTip(L"Разобрать проект clang'ом и снять снимок графа на текущем коммите (F5)");
+    scanButton = new vgui::Button(vgui::MySize<double>(136, 34), glm::dvec2(638, 11), fixedSize, inParent, glm::dvec2(0, 0), L"Сканировать");
+    scanButton->setToolTip(L"Разобрать весь проект clang'ом заново (F5); правленые файлы карта подхватывает сама");
     topBar->addChild(scanButton);
     scanButton->eventManager().subscribe<vgui::Button::Click_Event>(this, [this](const vgui::Button::Click_Event &) {startScan();});
 
-    statusLabel = new vgui::Label(vgui::MySize<double>(440, 30), glm::dvec2(922, 13), fixedSize, inParent);
+    statusLabel = new vgui::Label(vgui::MySize<double>(440, 30), glm::dvec2(790, 13), fixedSize, inParent);
     statusLabel->setFontSize(13);
     statusLabel->setTextColor(mutedColor);
     topBar->addChild(statusLabel);
 
-    scanProgress = new vgui::ProgressBar(vgui::MySize<double>(300, 4), glm::dvec2(922, 44), fixedSize, inParent);
+    scanProgress = new vgui::ProgressBar(vgui::MySize<double>(300, 4), glm::dvec2(790, 44), fixedSize, inParent);
     scanProgress->setVisible(false);
     topBar->addChild(scanProgress);
 
@@ -306,39 +312,72 @@ void App::createGui() {
     detailsPanel->enableScrollersHor(false);
     gui->addGuiObject(detailsPanel);
 
-    // Полоса истории снизу
-    historyBar = new vgui::ScrollAreaWidget(vgui::MySize<double>(800, historyHeight), glm::dvec2(edgeGap, -edgeGap), fixedSize, inWindow, glm::dvec2(0, 1));
-    historyBar->enableScrollers(false);
-    historyBar->setVisible(false);
-    gui->addGuiObject(historyBar);
+    // Полоса git снизу: pull и push, коммит всех правок, с чем сравнивать карту
+    gitBar = new vgui::ScrollAreaWidget(vgui::MySize<double>(800, gitBarHeight), glm::dvec2(edgeGap, -edgeGap), fixedSize, inWindow, glm::dvec2(0, 1));
+    gitBar->enableScrollers(false);
+    gitBar->setVisible(false);
+    gui->addGuiObject(gitBar);
 
-    auto *historyTitle = new vgui::Label(vgui::MySize<double>(90, 30), glm::dvec2(16, 14), fixedSize, inParent, glm::dvec2(0, 0), L"История");
-    historyTitle->setFontSize(14);
-    historyTitle->setTextColor(mutedColor);
-    historyBar->addChild(historyTitle);
+    auto addGitButton = [&](double x, double width, const std::wstring &text, const std::wstring &toolTip, GitCommand command) {
+        auto *button = new vgui::Button(vgui::MySize<double>(width, 34), glm::dvec2(x, 12), fixedSize, inParent, glm::dvec2(0, 0), text);
+        button->setToolTip(toolTip);
+        gitBar->addChild(button);
+        button->eventManager().subscribe<vgui::Button::Click_Event>(this, [this, command](const vgui::Button::Click_Event &) {requestGitCommand(command);});
+        return button;
+    };
+    addGitButton(14, 76, L"Pull", L"git pull; карта сама пересканирует пришедшие правки и сравнится с тем, что было до pull", GitCommand::Pull);
+    addGitButton(96, 76, L"Push", L"git push", GitCommand::Push);
 
-    historySlider = new vgui::Slider(vgui::MySize<double>(300, 26), glm::dvec2(110, 16), fixedSize, inParent);
-    historySlider->setToolTip(L"Снимки графа по сканированиям: один на коммит");
-    historyBar->addChild(historySlider);
-    historySlider->eventManager().subscribe<vgui::Slider::ValueChanged_Event>(this, [this](const vgui::Slider::ValueChanged_Event &event) {
-        int index = int(std::lround(event.value));
-        if (index != shownSnapshot)
-            pendingSnapshot = index;
+    auto *commitTitle = new vgui::Label(vgui::MySize<double>(70, 30), glm::dvec2(190, 14), fixedSize, inParent, glm::dvec2(0, 0), L"Коммит");
+    commitTitle->setFontSize(13);
+    commitTitle->setTextColor(mutedColor);
+    gitBar->addChild(commitTitle);
+
+    commitEdit = new vgui::LineEdit(vgui::MySize<double>(300, 34), glm::dvec2(256, 12), fixedSize, inParent);
+    commitEdit->setToolTip(L"Сообщение коммита; Enter или «Закоммитить всё» - git add -A и commit");
+    gitBar->addChild(commitEdit);
+
+    commitButton = addGitButton(562, 170, L"Закоммитить всё", L"git add -A (всё, что не в .gitignore) и commit с сообщением слева", GitCommand::Commit);
+
+    auto *compareTitle = new vgui::Label(vgui::MySize<double>(100, 30), glm::dvec2(-554, 14), fixedSize, inParent, glm::dvec2(0, 0), L"Сравнить с");
+    compareTitle->setFontSize(13);
+    compareTitle->setTextColor(mutedColor);
+    gitBar->addChild(compareTitle);
+
+    compareButton = new vgui::Button(vgui::MySize<double>(300, 34), glm::dvec2(-444, 12), fixedSize, inParent, glm::dvec2(0, 0), L"Прошлый коммит");
+    compareButton->setTextAlignedLeft(true);
+    compareButton->setToolTip(L"С каким коммитом сравнивать карту: прошлый коммит, до последнего pull или любой из списка");
+    gitBar->addChild(compareButton);
+    compareButton->eventManager().subscribe<vgui::Button::Click_Event>(this, [this](const vgui::Button::Click_Event &) {
+        if (commitListWindow->visible())
+            commitListWindow->setVisible(false);
+        else
+            openCommitList();
     });
 
-    historyLabel = new vgui::Label(vgui::MySize<double>(470, 30), glm::dvec2(-600, 14), fixedSize, inParent);
-    historyLabel->setFontSize(13);
-    historyBar->addChild(historyLabel);
-
-    diffCheck = new vgui::CheckBox(vgui::MySize<double>(120, 30), glm::dvec2(-124, 14), fixedSize, inParent, glm::dvec2(0, 0), L"Изменения");
+    diffCheck = new vgui::CheckBox(vgui::MySize<double>(124, 30), glm::dvec2(-134, 14), fixedSize, inParent, glm::dvec2(0, 0), L"Изменения");
     diffCheck->setState(true, false);
-    diffCheck->setToolTip(L"Отличия от предыдущего снимка: зелёные - новые, жёлтые - изменённые, пунктир - удалённые");
-    historyBar->addChild(diffCheck);
-    diffCheck->eventManager().subscribe<vgui::SwitchButton::StateChange_Event>(this, [this](const vgui::SwitchButton::StateChange_Event &event) {
-        mapView.isDiffShown = event.state && shownSnapshot > 0;
-        mapView.invalidate();
-        isDetailsDirty = true;
+    diffCheck->setToolTip(L"Отличия от выбранного коммита: зелёные - новые, жёлтые - изменённые, серые - удалённые; точка - не закоммичено");
+    gitBar->addChild(diffCheck);
+    diffCheck->eventManager().subscribe<vgui::SwitchButton::StateChange_Event>(this, [this](const vgui::SwitchButton::StateChange_Event &) {
+        updateComparison();
     });
+
+    // Список коммитов для сравнения - над полосой git
+    commitListWindow = new vgui::ScrollAreaWidget(vgui::MySize<double>(620, 440), glm::dvec2(edgeGap, -(gitBarHeight + 2 * edgeGap)), fixedSize, inWindow,
+                                                  glm::dvec2(0, 1), L"Сравнить с");
+    commitListWindow->enableScrollersHor(false);
+    commitListWindow->setCloseability(true);
+    commitListWindow->setVisible(false);
+    gui->addGuiObject(commitListWindow);
+
+    // Вывод git при ошибке - посередине окна
+    gitOutputWindow = new vgui::ScrollAreaWidget(vgui::MySize<double>(760, 420), glm::dvec2(0.5, 0.5), fixedSize,
+                                                 {vgui::RELATIVE_WINDOW_POSITION, vgui::RELATIVE_WINDOW_POSITION}, glm::dvec2(0.5, 0.5), L"Git");
+    gitOutputWindow->enableScrollersHor(false);
+    gitOutputWindow->setCloseability(true);
+    gitOutputWindow->setVisible(false);
+    gui->addGuiObject(gitOutputWindow);
 
     createSettingsWindow();
     updateGuiGeometry();
@@ -557,11 +596,16 @@ void App::closeSettingsWindow() {
 void App::updateGuiGeometry() {
     double scale = windowSize.y / 1080.0;
     double widthUnits = windowSize.x / scale;
-    double historyWidth = std::max(500.0, widthUnits - 3 * edgeGap - detailsWidth);
-    historyBar->setStandardWidgetSize(vgui::MySize<double>(historyWidth, historyHeight));
-    historySlider->setStandardWidgetSize(vgui::MySize<double>(std::max(120.0, historyWidth - 110 - 620), 26));
+    double gitBarWidth = std::max(1000.0, widthUnits - 3 * edgeGap - detailsWidth);
+    gitBar->setStandardWidgetSize(vgui::MySize<double>(gitBarWidth, gitBarHeight));
+
+    // Поле коммита - на всё место между Push и сравнением, список коммитов - над кнопкой сравнения
+    double commitEditWidth = std::max(160.0, gitBarWidth - 256 - 176 - 554 - 16);
+    commitEdit->setStandardWidgetSize(vgui::MySize<double>(commitEditWidth, 34));
+    commitButton->setStandardWidgetPos(glm::dvec2(256 + commitEditWidth + 6, 12));
+    commitListWindow->setStandardWidgetPos(glm::dvec2(std::max(edgeGap, edgeGap + gitBarWidth - 444 - 320), -(gitBarHeight + 2 * edgeGap)));
     mapView.setViewport(windowSize);
-    mapView.setViewInsets(glm::dvec4(0, (topBarHeight + edgeGap) * scale, (detailsWidth + 2 * edgeGap) * scale, (historyHeight + 2 * edgeGap) * scale));
+    mapView.setViewInsets(glm::dvec4(0, (topBarHeight + edgeGap) * scale, (detailsWidth + 2 * edgeGap) * scale, (gitBarHeight + 2 * edgeGap) * scale));
 }
 
 
@@ -570,7 +614,8 @@ bool App::isCursorOverGui() {
     if (gui->context().popupObject() != nullptr)
         return true;
     return topBar->cursorInWidget() || (detailsPanel->visible() && detailsPanel->cursorInWidget()) ||
-           (historyBar->visible() && historyBar->cursorInWidget()) || (settingsWindow->visible() && settingsWindow->cursorInWidget());
+           (gitBar->visible() && gitBar->cursorInWidget()) || (settingsWindow->visible() && settingsWindow->cursorInWidget()) ||
+           (commitListWindow->visible() && commitListWindow->cursorInWidget()) || (gitOutputWindow->visible() && gitOutputWindow->cursorInWidget());
 }
 
 
@@ -612,16 +657,25 @@ void App::relayoutMap() {
 }
 
 
-// Открыть проект: шаблон, раскладка, история; показать последний снимок
+// Открыть проект: шаблон, раскладка, граф, git
 void App::openProject(const std::wstring &root) {
     std::error_code errorCode;
     if (root.empty() || !std::filesystem::is_directory(root, errorCode)) {
-        statusLabel->setText(L"Нет такой папки");
+        statusLabel->setText(L"Нет такой папки: " + root);
         return;
     }
-    if (isScanning) {
-        statusLabel->setText(L"Идёт сканирование - сначала остановить");
+    if (jobKind == JobKind::Scan || jobKind == JobKind::GitCommand) {
+        statusLabel->setText(jobKind == JobKind::Scan ? L"Идёт сканирование - сначала остановить" : L"Идёт команда git - дождаться её");
         return;
+    }
+
+    // Остальная фоновая работа - про прежний проект: остановить и дождаться
+    waitChangeCheck();
+    if (jobKind != JobKind::None) {
+        analyzer.isStopRequested = true;
+        jobThread.join();
+        jobKind = JobKind::None;
+        scanProgress->setVisible(false);
     }
     saveLayout();
 
@@ -632,7 +686,6 @@ void App::openProject(const std::wstring &root) {
     bool hasSavedCamera = layout.hasCamera;
     glm::dvec2 savedCameraCenter = layout.cameraCenter;
     double savedCameraZoom = layout.cameraZoom;
-    history.load(project.dataDir);
     mapView.layout = &layout;
     mapView.graph = nullptr;
     mapView.previousGraph = nullptr;
@@ -640,55 +693,82 @@ void App::openProject(const std::wstring &root) {
     mapView.selectedNote = -1;
     mapView.hoveredNode = -1;
     shownGraph.clear();
-    previousGraph.clear();
-    shownSnapshot = -1;
+    scanState = ScanState();
+    isScanStateLoaded = false;
+    commitGraphs.clear();
+    failedCommits.clear();
+    changedFiles.clear();
+    isRefreshRequested = false;
+    isScanRequested = false;
+    requestedGitCommand = GitCommand::None;
+    compareCommit.clear();
 
-    projectEdit->setText(project.root);
+    // Граф карты; нет его - последний снимок прежней истории (до сравнения с коммитами граф хранился снимками по сканированиям)
+    std::filesystem::path dataDir(project.dataDir);
+    if (!shownGraph.load((dataDir / "graph.txt").wstring())) {
+        std::ifstream index(dataDir / "history" / "index.txt", std::ios::binary);
+        std::string line, lastSnapshot;
+        while (std::getline(index, line)) {
+            std::vector<std::string> fields = splitFields(line);
+            if (fields.size() > 1 && fields[0] == "S")
+                lastSnapshot = fields[1];
+        }
+        if (!lastSnapshot.empty())
+            shownGraph.load((dataDir / "history" / lastSnapshot).wstring());
+    }
+
+    // Git: HEAD, прошлый коммит, с чем сравнивать
+    gitDir = Git::gitDir(project.root);
+    headCommit.clear();
+    previousCommit.clear();
+    headLogTime = 0;
+    compareTarget = "previous";
+    beforePullCommit.clear();
+    if (!gitDir.empty()) {
+        headCommit = Git::resolve(project.root, "HEAD");
+        previousCommit = Git::resolve(project.root, "HEAD~1");
+        headLogTime = fileTime(std::filesystem::path(gitDir) / "logs" / "HEAD") + fileTime(std::filesystem::path(gitDir) / "HEAD");
+        std::ifstream choice(dataDir / "git.txt", std::ios::binary);
+        std::string line;
+        while (std::getline(choice, line)) {
+            std::vector<std::string> fields = splitFields(line);
+            if (fields.size() >= 2 && fields[0] == "compare" && !fields[1].empty())
+                compareTarget = fields[1];
+            else if (fields.size() >= 2 && fields[0] == "before_pull")
+                beforePullCommit = fields[1];
+        }
+    }
+    gitBar->setVisible(!gitDir.empty());
+    commitListWindow->setVisible(false);
+    gitOutputWindow->setVisible(false);
+
     SDL_SetWindowTitle(window, wstringToString(L"CodeAtlas - " + project.name).c_str());
-    std::ofstream recent(recentProjectFile(), std::ios::binary);
-    recent << wstringToString(project.root);
+    updateRecentProjects(project.root);
 
-    if (!history.snapshots.empty())
-        showSnapshot(int(history.snapshots.size()) - 1);
+    if (!shownGraph.nodes.empty())
+        showGraph(std::string());
     if (hasSavedCamera) {
         mapView.cameraCenter = savedCameraCenter;
         mapView.zoom = savedCameraZoom;
     } else {
         mapView.fitAll(true);
     }
-    if (history.snapshots.empty())
+    if (shownGraph.nodes.empty()) {
         statusLabel->setText(hasTemplate ? L"Карты ещё нет - «Сканировать»" : L"Нет codeatlas.yaml - общий C++ без компонентов; «Сканировать»");
-    historyBar->setVisible(!history.snapshots.empty());
+        updateComparison();
+    }
     mapView.invalidate();
     isDetailsDirty = true;
-    Debug() << "CodeAtlas: проект открыт, снимков" << history.snapshots.size() << ", узлов на карте" << shownGraph.nodes.size();
+    Debug() << "CodeAtlas: проект открыт, узлов на карте" << shownGraph.nodes.size() << (gitDir.empty() ? ", не git" : ", git");
 }
 
 
-// Показать снимок истории (граф, сравнение с предыдущим, места новых узлов)
-void App::showSnapshot(int snapshotIndex) {
-    if (snapshotIndex < 0 || snapshotIndex >= int(history.snapshots.size()))
-        return;
-    std::string selectedId = mapView.graph != nullptr && mapView.selectedNode >= 0 ? mapView.graph->nodes[mapView.selectedNode].id : std::string();
-    if (!history.loadGraph(project.dataDir, snapshotIndex, shownGraph)) {
-        statusLabel->setText(L"Не прочитан снимок истории");
-        return;
-    }
-
-    // Сравнение с предыдущим снимком
-    previousGraph.clear();
-    if (snapshotIndex > 0 && history.loadGraph(project.dataDir, snapshotIndex - 1, previousGraph)) {
-        History::compare(previousGraph, shownGraph, mapView.diffStates, mapView.removedNodes);
-    } else {
-        mapView.diffStates.assign(shownGraph.nodes.size(), DiffState::Same);
-        mapView.removedNodes.clear();
-    }
+// Граф на карте сменился: места новых узлов, раздвигание наложений, выбор, поиск, сравнение
+void App::showGraph(const std::string &selectedId) {
     mapView.graph = &shownGraph;
-    mapView.previousGraph = &previousGraph;
-    mapView.isDiffShown = diffCheck->getState() && snapshotIndex > 0;
 
     // Новые узлы - на свободные места; раскладки не было - вид на всю карту. Налезшее друг на друга (старая раскладка при других
-    // размерах, выросшие файлы) раздвигается вправо и вниз
+    // размерах, выросшие функции) раздвигается вправо и вниз
     bool hadPositions = !layout.nodePositions.empty();
     int placedCount = layout.placeNewNodes(shownGraph);
     int separatedCount = layout.separate(shownGraph);
@@ -703,29 +783,123 @@ void App::showSnapshot(int snapshotIndex) {
 
     mapView.selectedNode = selectedId.empty() ? -1 : shownGraph.findNode(selectedId);
     mapView.hoveredNode = -1;
-    shownSnapshot = snapshotIndex;
     updateSearch(searchEdit->text());
-
-    historyBar->setVisible(true);
-    int snapshotsCount = int(history.snapshots.size());
-    historySlider->setRange(0, std::max(1, snapshotsCount - 1), 1);
-    historySlider->setValue(snapshotIndex);
-    historySlider->setBlocking(snapshotsCount < 2);
-    constexpr size_t maxDescriptionLength = 52;
-    std::wstring description = history.describe(snapshotIndex);
-    if (description.size() > maxDescriptionLength)
-        description = description.substr(0, maxDescriptionLength - 1) + L"…";
-    historyLabel->setText((snapshotsCount < 2 ? L"" : std::to_wstring(snapshotIndex + 1) + L"/" + std::to_wstring(snapshotsCount) + L"  ") + description);
-    historyLabel->setToolTip(history.describe(snapshotIndex));
+    updateComparison();
     statusLabel->setText(L"Узлов " + std::to_wstring(shownGraph.nodes.size()) + L", связей " + std::to_wstring(shownGraph.edges.size()));
     mapView.invalidate();
     isDetailsDirty = true;
 }
 
 
-// Сканирование в потоке и его ход
+// Сравнение карты с выбранным коммитом и с HEAD (правки после последнего коммита); графа коммита нет - он заказывается
+void App::updateComparison() {
+    mapView.isDiffShown = false;
+    mapView.isUncommittedShown = false;
+    mapView.previousGraph = nullptr;
+    mapView.diffStates.clear();
+    mapView.removedNodes.clear();
+    mapView.ghostRects.clear();
+    mapView.uncommittedNodes.clear();
+    mapView.uncommittedGhosts.clear();
+    mapView.invalidate();
+    isDetailsDirty = true;
+
+    // С чем сравнивать: прошлый коммит (следует за HEAD) или выбранный
+    compareCommit = compareTarget == "previous" ? previousCommit : compareTarget;
+    std::wstring shortHash = stringToWString(compareCommit.substr(0, 7));
+    if (compareTarget == "previous")
+        compareButton->setText(L"Прошлый коммит" + (shortHash.empty() ? std::wstring() : L"  ·  " + shortHash));
+    else if (compareTarget == beforePullCommit)
+        compareButton->setText(L"До pull  ·  " + shortHash);
+    else
+        compareButton->setText(L"Коммит  ·  " + shortHash);
+    if (gitDir.empty() || shownGraph.nodes.empty() || !diffCheck->getState())
+        return;
+
+    // Граф коммита: уже собранный или с диска (папка данных проекта)
+    auto graphOf = [&](const std::string &commit) -> const Graph* {
+        if (commit.empty())
+            return nullptr;
+        auto found = commitGraphs.find(commit);
+        if (found != commitGraphs.end())
+            return &found->second;
+        std::filesystem::path path = std::filesystem::path(project.dataDir) / "commits" / (commit + ".graph");
+        std::error_code errorCode;
+        if (!std::filesystem::exists(path, errorCode))
+            return nullptr;
+        Graph &graph = commitGraphs[commit];
+        if (graph.load(path.wstring()))
+            return &graph;
+        commitGraphs.erase(commit);
+        return nullptr;
+    };
+
+    const Graph *compared = graphOf(compareCommit);
+    if (compared != nullptr) {
+        Graph::compare(*compared, shownGraph, mapView.diffStates, mapView.removedNodes);
+        mapView.previousGraph = compared;
+        mapView.isDiffShown = true;
+
+        // Места призраков: строками под блоками своего файла в ширину рамки (прежние места могли занять новые блоки, а файл - переехать);
+        // файла на карте больше нет - прежнее место узла, если было
+        struct GhostRow {
+            double left = 0;
+            double right = 0;
+            glm::dvec2 cursor{0, 0};
+            double height = 0;
+        };
+        std::map<std::wstring, std::vector<int>> liveNodesOfFile = Layout::nodesByFile(shownGraph);
+        std::map<std::wstring, GhostRow> rows;
+        for (int previousIndex : mapView.removedNodes) {
+            const GraphNode &node = compared->nodes[previousIndex];
+            glm::dvec2 size = Layout::nodeSize(node);
+            auto liveNodes = liveNodesOfFile.find(node.file);
+            LayoutRect frame = liveNodes == liveNodesOfFile.end() ? LayoutRect() : layout.fileFrame(shownGraph, liveNodes->second);
+            if (frame.size.x <= 0) {
+                auto found = layout.nodePositions.find(node.id);
+                mapView.ghostRects.push_back(found == layout.nodePositions.end() ? LayoutRect() : LayoutRect{found->second, size});
+                continue;
+            }
+            auto row = rows.find(node.file);
+            if (row == rows.end()) {
+                GhostRow first;
+                first.left = frame.position.x + Layout::framePadding;
+                first.right = frame.position.x + frame.size.x - Layout::framePadding;
+                first.cursor = glm::dvec2(first.left, frame.position.y + frame.size.y - Layout::framePadding + Layout::nodeGapY);
+                row = rows.emplace(node.file, first).first;
+            }
+            GhostRow &ghostRow = row->second;
+            if (ghostRow.cursor.x > ghostRow.left && ghostRow.cursor.x + size.x > ghostRow.right) {
+                ghostRow.cursor = glm::dvec2(ghostRow.left, ghostRow.cursor.y + ghostRow.height + Layout::nodeGapY);
+                ghostRow.height = 0;
+            }
+            mapView.ghostRects.push_back(LayoutRect{ghostRow.cursor, size});
+            ghostRow.cursor.x += size.x + Layout::nodeGapX;
+            ghostRow.height = std::max(ghostRow.height, size.y);
+        }
+    }
+
+    // Правки после последнего коммита: отличия от графа HEAD
+    const Graph *head = graphOf(headCommit);
+    if (head != nullptr) {
+        std::vector<DiffState> headStates;
+        std::vector<int> headRemoved;
+        Graph::compare(*head, shownGraph, headStates, headRemoved);
+        mapView.uncommittedNodes.assign(shownGraph.nodes.size(), 0);
+        for (size_t nodeIndex = 0; nodeIndex < headStates.size(); ++nodeIndex)
+            mapView.uncommittedNodes[nodeIndex] = headStates[nodeIndex] != DiffState::Same;
+        if (compared != nullptr) {
+            for (int previousIndex : mapView.removedNodes)
+                mapView.uncommittedGhosts.push_back(head->findNode(compared->nodes[previousIndex].id) >= 0);
+        }
+        mapView.isUncommittedShown = true;
+    }
+}
+
+
+// Сканирование всего проекта (идёт - остановить)
 void App::startScan() {
-    if (isScanning) {
+    if (jobKind == JobKind::Scan) {
         analyzer.isStopRequested = true;
         statusLabel->setText(L"Остановка…");
         return;
@@ -734,47 +908,538 @@ void App::startScan() {
         statusLabel->setText(L"Сначала открыть проект");
         return;
     }
-    project.load(project.root);
-    scanProject = project;
-    analyzer.threadsCount = settings().scanThreads;
-    isScanFinished = false;
-    isScanning = true;
-    scanButton->setText(L"Остановить");
-    scanProgress->setValue(0, vgui::Pixel(47, 111, 223));
-    scanProgress->setVisible(true);
-    statusLabel->setText(L"Чтение compile_commands.json…");
-    scanThread = std::thread([this]() {
-        isScanSucceeded = analyzer.scan(scanProject, scanGraph, scanError);
-        isScanFinished = true;
-    });
+    isScanRequested = true;
+    if (jobKind != JobKind::None)
+        statusLabel->setText(L"Сканирование - после текущей работы");
 }
 
-void App::pollScan() {
-    if (!isScanning)
+
+// Следующая фоновая работа, если поток свободен: команда git, сканирование, загрузка разобранного, пересканирование правок, графы коммитов
+void App::startNextJob() {
+    if (jobKind != JobKind::None || isChangeChecking || project.root.empty())
+        return;
+    std::filesystem::path dataDir(project.dataDir);
+    std::filesystem::path statePath = dataDir / "scan.txt";
+    std::error_code errorCode;
+
+    // Что делать
+    JobKind next = JobKind::None;
+    if (requestedGitCommand != GitCommand::None) {
+        next = JobKind::GitCommand;
+    } else if (isScanRequested) {
+        next = JobKind::Scan;
+    } else if (!isScanStateLoaded) {
+        if (std::filesystem::exists(statePath, errorCode)) {
+            next = JobKind::LoadState;
+        } else {
+            isScanStateLoaded = true;
+            if (!shownGraph.nodes.empty())
+                statusLabel->setText(L"Слежение за правками и сравнение с коммитами - после «Сканировать»");
+        }
+    } else if (isRefreshRequested && !scanState.files.empty()) {
+        next = JobKind::Refresh;
+    } else if (!gitDir.empty() && !scanState.files.empty() && diffCheck->getState()) {
+        for (const std::string &commit : {compareCommit, headCommit}) {
+            if (commit.empty() || commitGraphs.count(commit) > 0 || failedCommits.count(commit) > 0)
+                continue;
+            jobCommit = commit;
+            next = JobKind::CommitGraph;
+            break;
+        }
+    }
+    if (next == JobKind::None)
+        return;
+
+    // Задача и её поток
+    jobKind = next;
+    isJobFinished = false;
+    isJobSucceeded = false;
+    jobError.clear();
+    jobStartTime = std::chrono::steady_clock::now();
+    if (next == JobKind::Scan)
+        project.load(project.root);
+    jobProject = project;
+    analyzer.threadsCount = settings().scanThreads;
+    analyzer.unitsTotal = 0;
+    analyzer.unitsDone = 0;
+    switch (next) {
+    case JobKind::Scan:
+        isScanRequested = false;
+        isRefreshRequested = false;
+        changedFiles.clear();
+        scanButton->setText(L"Остановить");
+        scanProgress->setValue(0, vgui::Pixel(47, 111, 223));
+        scanProgress->setVisible(true);
+        statusLabel->setText(L"Чтение compile_commands.json…");
+        jobThread = std::thread([this, dataDir]() {
+            isJobSucceeded = analyzer.scan(jobProject, jobState, jobError);
+            if (isJobSucceeded) {
+                Analyzer::buildGraph(jobProject, jobState, FileVersions(), jobGraph);
+                jobState.save((dataDir / "scan.txt").wstring());
+                jobGraph.save((dataDir / "graph.txt").wstring());
+            }
+            isJobFinished = true;
+        });
+        break;
+
+    case JobKind::LoadState:
+        jobThread = std::thread([this, statePath]() {
+            isJobSucceeded = jobState.load(statePath.wstring());
+            isJobFinished = true;
+        });
+        break;
+
+    case JobKind::Refresh:
+        jobFiles = changedFiles;
+        changedFiles.clear();
+        isRefreshRequested = false;
+        statusLabel->setText(L"Обновление правленых файлов…");
+        jobThread = std::thread([this, dataDir]() {
+            jobState = scanState;
+            isJobSucceeded = analyzer.update(jobProject, jobState, jobFiles, FileVersions(), jobError);
+            if (isJobSucceeded) {
+                Analyzer::buildGraph(jobProject, jobState, FileVersions(), jobGraph);
+                jobState.save((dataDir / "scan.txt").wstring());
+                jobGraph.save((dataDir / "graph.txt").wstring());
+            }
+            isJobFinished = true;
+        });
+        break;
+
+    case JobKind::CommitGraph:
+        statusLabel->setText(L"Граф коммита " + stringToWString(jobCommit.substr(0, 7)) + L"…");
+        jobThread = std::thread([this, dataDir]() {
+            // Файлы, которые в рабочей папке не такие, как на коммите: текст их версии на коммите (код и шейдеры)
+            std::map<std::wstring, char> changed;
+            if (!Git::changedFiles(jobProject.root, jobCommit, changed)) {
+                jobError = L"git diff не прошёл для " + stringToWString(jobCommit.substr(0, 7));
+                isJobFinished = true;
+                return;
+            }
+            static const std::set<std::wstring> codeExtensions = {L".c", L".cc", L".cpp", L".cxx", L".c++", L".h", L".hh", L".hpp", L".hxx",
+                                                                  L".inl", L".ipp", L".tpp", L".m", L".mm"};
+            std::set<std::wstring> shaderExtensions;
+            for (const std::string &extension : jobProject.shaderExtensions)
+                shaderExtensions.insert(L"." + stringToWString(extension));
+            FileVersions versions;
+            std::set<std::wstring> files;
+            for (const auto &[file, status] : changed) {
+                std::wstring extension = std::filesystem::path(file).extension().wstring();
+                std::transform(extension.begin(), extension.end(), extension.begin(), ::towlower);
+                if (codeExtensions.count(extension) == 0 && shaderExtensions.count(extension) == 0 && scanState.fileTimes.count(file) == 0)
+                    continue;
+                files.insert(file);
+                std::string content;
+                if (status != 'A' && Git::fileAt(jobProject.root, jobCommit, file, content))
+                    versions.contents[file] = content;
+                else
+                    versions.absentFiles.insert(file);
+            }
+
+            // Проект на коммите: разобранное сейчас, отличающиеся файлы - пересканированные в версии коммита
+            jobState = scanState;
+            isJobSucceeded = files.empty() || analyzer.update(jobProject, jobState, files, versions, jobError);
+            if (isJobSucceeded) {
+                Analyzer::buildGraph(jobProject, jobState, versions, jobGraph);
+                jobGraph.save((dataDir / "commits" / (jobCommit + ".graph")).wstring());
+            }
+            Debug() << "CodeAtlas: граф коммита" << jobCommit.substr(0, 7) << ", отличающихся файлов" << files.size();
+            isJobFinished = true;
+        });
+        break;
+
+    case JobKind::GitCommand:
+        jobGitCommand = requestedGitCommand;
+        requestedGitCommand = GitCommand::None;
+        statusLabel->setText(jobGitCommand == GitCommand::Pull ? L"git pull…" : jobGitCommand == GitCommand::Commit ? L"git commit…" : L"git push…");
+        jobThread = std::thread([this, dataDir]() {
+            if (jobGitCommand == GitCommand::Pull) {
+                jobHeadBefore = Git::resolve(jobProject.root, "HEAD");
+                isJobSucceeded = Git::pull(jobProject.root, jobGitOutput);
+            } else if (jobGitCommand == GitCommand::Commit) {
+                isJobSucceeded = Git::commitAll(jobProject.root, (dataDir / "commit_message.txt").wstring(), jobGitOutput);
+            } else {
+                isJobSucceeded = Git::push(jobProject.root, jobGitOutput);
+            }
+            isJobFinished = true;
+        });
+        break;
+
+    default:
+        jobKind = JobKind::None;
+        break;
+    }
+}
+
+
+// Ход фоновой работы и её итог
+void App::pollJob() {
+    if (jobKind == JobKind::None)
         return;
     int total = analyzer.unitsTotal;
     int done = analyzer.unitsDone;
-    if (total > 0) {
+    if (jobKind == JobKind::Scan && total > 0) {
         statusLabel->setText(L"Разбор: " + std::to_wstring(done) + L" из " + std::to_wstring(total));
         scanProgress->setValue(float(done) / float(total), vgui::Pixel(47, 111, 223));
     }
-    if (!isScanFinished)
+    if (!isJobFinished)
         return;
 
-    scanThread.join();
-    isScanning = false;
+    // Граф не меняется, пока блок тащат: итог - после отпускания
+    if ((jobKind == JobKind::Scan || jobKind == JobKind::Refresh) && mapView.isDragging())
+        return;
+
+    jobThread.join();
+    JobKind finishedKind = jobKind;
+    jobKind = JobKind::None;
     scanButton->setText(L"Сканировать");
     scanProgress->setVisible(false);
-    if (!isScanSucceeded) {
-        statusLabel->setText(scanError);
+    double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - jobStartTime).count();
+    std::wstring secondsText = std::to_wstring(int(std::lround(seconds * 10)) / 10) + L"," + std::to_wstring(int(std::lround(seconds * 10)) % 10) + L" с";
+    std::string selectedId = mapView.selectedNode >= 0 && mapView.selectedNode < int(shownGraph.nodes.size()) ? shownGraph.nodes[mapView.selectedNode].id
+                                                                                                               : std::string();
+    switch (finishedKind) {
+    case JobKind::Scan: {
+        if (!isJobSucceeded) {
+            statusLabel->setText(jobError);
+            break;
+        }
+        scanState = std::move(jobState);
+        isScanStateLoaded = true;
+
+        // Графы коммитов собраны по прежнему разбору - заново
+        commitGraphs.clear();
+        failedCommits.clear();
+        std::error_code errorCode;
+        std::filesystem::remove_all(std::filesystem::path(project.dataDir) / "commits", errorCode);
+        shownGraph = std::move(jobGraph);
+        showGraph(selectedId);
+        int errorsCount = analyzer.unitsWithErrors;
+        if (errorsCount > 0)
+            statusLabel->setText(L"Узлов " + std::to_wstring(shownGraph.nodes.size()) + L", связей " + std::to_wstring(shownGraph.edges.size()) +
+                                 L"; с ошибками разбора: " + std::to_wstring(errorsCount) + L" из " + std::to_wstring(total));
+        break;
+    }
+
+    case JobKind::LoadState:
+        isScanStateLoaded = true;
+        if (isJobSucceeded)
+            scanState = std::move(jobState);
+        Debug() << "CodeAtlas: разобранное загружено, файлов" << scanState.files.size() << "за" << seconds << "с";
+        break;
+
+    case JobKind::Refresh:
+        if (!isJobSucceeded) {
+            statusLabel->setText(jobError);
+            break;
+        }
+        scanState = std::move(jobState);
+        shownGraph = std::move(jobGraph);
+        showGraph(selectedId);
+        statusLabel->setText(L"Обновлено файлов: " + std::to_wstring(jobFiles.size()) + L" за " + secondsText);
+        Debug() << "CodeAtlas: обновлено файлов" << jobFiles.size() << "за" << seconds << "с";
+        break;
+
+    case JobKind::CommitGraph:
+        if (!isJobSucceeded) {
+            failedCommits.insert(jobCommit);
+            statusLabel->setText(jobError);
+            break;
+        }
+        commitGraphs[jobCommit] = std::move(jobGraph);
+        updateComparison();
+        statusLabel->setText(L"Граф коммита " + stringToWString(jobCommit.substr(0, 7)) + L" за " + secondsText);
+        Debug() << "CodeAtlas: граф коммита" << jobCommit.substr(0, 7) << "готов за" << seconds << "с";
+        break;
+
+    case JobKind::GitCommand: {
+        std::wstring name = jobGitCommand == GitCommand::Pull ? L"Pull" : jobGitCommand == GitCommand::Commit ? L"Коммит" : L"Push";
+        if (!isJobSucceeded) {
+            statusLabel->setText(name + L" не прошёл");
+            showGitOutput(name + L" не прошёл", jobGitOutput);
+            break;
+        }
+        if (jobGitCommand == GitCommand::Pull) {
+            // Пришли коммиты - карта сравнивается с тем, что было до pull
+            std::string headAfter = Git::resolve(project.root, "HEAD");
+            if (!jobHeadBefore.empty() && headAfter != jobHeadBefore) {
+                beforePullCommit = jobHeadBefore;
+                compareTarget = jobHeadBefore;
+                saveGitChoice();
+                statusLabel->setText(L"Pull: пришли коммиты, сравнение - с тем, что было до pull");
+            } else {
+                statusLabel->setText(L"Pull: новых коммитов нет");
+            }
+        } else if (jobGitCommand == GitCommand::Commit) {
+            commitEdit->setText(L"");
+            statusLabel->setText(L"Закоммичено");
+        } else {
+            statusLabel->setText(L"Push: готово");
+        }
+        Debug() << "CodeAtlas: git" << wstringToString(name) << "\n" << jobGitOutput;
+        break;
+    }
+
+    default:
+        break;
+    }
+
+    // Правки и HEAD - сразу (после pull и коммита они точно сменились)
+    lastChangeCheckTime = -1;
+}
+
+
+// Правки на диске и сдвиг HEAD (раз в пару секунд, когда поток свободен)
+void App::checkChanges() {
+    constexpr double checkInterval = 2; // Секунды между проверками
+
+    // Итог проверки правок
+    if (isChangeChecking) {
+        if (!isChangeCheckFinished)
+            return;
+        changeCheckThread.join();
+        isChangeChecking = false;
+        if (isChangeCheckFound) {
+            changedFiles.insert(changeCheckFiles.begin(), changeCheckFiles.end());
+            isRefreshRequested = true;
+        }
+    }
+    if (jobKind != JobKind::None || project.root.empty())
+        return;
+    double now = double(SDL_GetTicks()) / 1000.0;
+    if (lastChangeCheckTime >= 0 && now - lastChangeCheckTime < checkInterval)
+        return;
+    lastChangeCheckTime = now;
+
+    // HEAD сдвинулся (коммит, pull, checkout): прошлый коммит и сравнение - заново
+    if (!gitDir.empty()) {
+        int64_t time = fileTime(std::filesystem::path(gitDir) / "logs" / "HEAD") + fileTime(std::filesystem::path(gitDir) / "HEAD");
+        if (time != headLogTime) {
+            headLogTime = time;
+            std::string head = Git::resolve(project.root, "HEAD");
+            if (head != headCommit) {
+                headCommit = head;
+                previousCommit = Git::resolve(project.root, "HEAD~1");
+                Debug() << "CodeAtlas: HEAD" << headCommit.substr(0, 7);
+                updateComparison();
+            }
+        }
+    }
+
+    // Правленые на диске файлы - потоком проверки по копии времени правки
+    if (isScanStateLoaded && !scanState.fileTimes.empty()) {
+        changeCheckState.fileTimes = scanState.fileTimes;
+        changeCheckState.compileCommandsPath = scanState.compileCommandsPath;
+        changeCheckState.compileCommandsTime = scanState.compileCommandsTime;
+        changeCheckFiles.clear();
+        isChangeCheckFinished = false;
+        isChangeChecking = true;
+        std::wstring root = project.root;
+        changeCheckThread = std::thread([this, root]() {
+            isChangeCheckFound = Analyzer::findChangedFiles(changeCheckState, root, changeCheckFiles);
+            isChangeCheckFinished = true;
+        });
+    }
+}
+
+
+// Дождаться проверки правок, если идёт (перед сменой проекта и выходом)
+void App::waitChangeCheck() {
+    if (!isChangeChecking)
+        return;
+    changeCheckThread.join();
+    isChangeChecking = false;
+    isChangeCheckFound = false;
+}
+
+
+// Команда git из полосы снизу
+void App::requestGitCommand(GitCommand command) {
+    if (gitDir.empty())
+        return;
+    if (jobKind == JobKind::GitCommand || requestedGitCommand != GitCommand::None) {
+        statusLabel->setText(L"Команда git уже идёт");
         return;
     }
-    int snapshotIndex = history.add(project.dataDir, project.root, scanGraph);
-    showSnapshot(snapshotIndex);
-    int errorsCount = analyzer.unitsWithErrors;
-    if (errorsCount > 0)
-        statusLabel->setText(L"Узлов " + std::to_wstring(shownGraph.nodes.size()) + L", связей " + std::to_wstring(shownGraph.edges.size()) +
-                             L"; с ошибками разбора: " + std::to_wstring(errorsCount) + L" из " + std::to_wstring(total));
+
+    // Сообщение коммита - файлом (любые кавычки и переводы строк)
+    if (command == GitCommand::Commit) {
+        std::wstring message = commitEdit->text();
+        if (message.find_first_not_of(L" \t") == std::wstring::npos) {
+            statusLabel->setText(L"Сначала сообщение коммита");
+            return;
+        }
+        std::filesystem::path messageFile = std::filesystem::path(project.dataDir) / "commit_message.txt";
+        std::error_code errorCode;
+        std::filesystem::create_directories(messageFile.parent_path(), errorCode);
+        std::ofstream file(messageFile, std::ios::binary);
+        file << wstringToString(message) << '\n';
+        if (!file) {
+            statusLabel->setText(L"Не записано сообщение коммита в " + messageFile.generic_wstring());
+            return;
+        }
+    }
+    requestedGitCommand = command;
+    if (jobKind != JobKind::None)
+        statusLabel->setText(L"Команда git - после текущей работы");
+}
+
+
+// Окно вывода git (ошибка pull, коммита, push) с кнопкой терминала
+void App::showGitOutput(const std::wstring &title, const std::string &output) {
+    constexpr double windowWidth = 760;
+    constexpr double left = 18;
+    constexpr int charsPerLine = 92;
+    constexpr int maxLines = 40;
+    gitOutputWindow->removeAllChildren();
+    double y = 14;
+    auto *titleLabel = new vgui::Label(vgui::MySize<double>(windowWidth - 2 * left, 28), glm::dvec2(left, y), fixedSize, inParent, glm::dvec2(0, 0), title);
+    titleLabel->setFontSize(18);
+    titleLabel->setTextColor(inkColor);
+    gitOutputWindow->addChild(titleLabel);
+    y += 38;
+
+    // Последние строки вывода, длинные - переносом
+    std::vector<std::wstring> lines;
+    std::stringstream stream(output);
+    std::string line;
+    while (std::getline(stream, line)) {
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+        std::wstring text;
+        for (wchar_t character : stringToWString(line))
+            text += character == L'\t' ? std::wstring(4, L' ') : std::wstring(1, character);
+        do {
+            lines.push_back(text.substr(0, charsPerLine));
+            text = text.size() > size_t(charsPerLine) ? text.substr(charsPerLine) : std::wstring();
+        } while (!text.empty());
+    }
+    size_t first = lines.size() > size_t(maxLines) ? lines.size() - maxLines : 0;
+    for (size_t i = first; i < lines.size(); ++i) {
+        auto *label = new vgui::Label(vgui::MySize<double>(windowWidth - 2 * left, 20), glm::dvec2(left, y), fixedSize, inParent, glm::dvec2(0, 0), lines[i]);
+        label->setFontSize(13);
+        label->setTextColor(inkColor);
+        gitOutputWindow->addChild(label);
+        y += 20;
+    }
+
+    y += 14;
+    auto *terminalButton = new vgui::Button(vgui::MySize<double>(200, 34), glm::dvec2(left, y), fixedSize, inParent, glm::dvec2(0, 0), L"Открыть терминал");
+    terminalButton->setToolTip(L"Терминал в папке проекта - разобраться с git руками");
+    gitOutputWindow->addChild(terminalButton);
+    terminalButton->eventManager().subscribe<vgui::Button::Click_Event>(this, [this](const vgui::Button::Click_Event &) {
+        if (!Git::openTerminal(project.root))
+            statusLabel->setText(L"Терминал не запустился");
+    });
+    auto *closeButton = new vgui::Button(vgui::MySize<double>(120, 34), glm::dvec2(left + 210, y), fixedSize, inParent, glm::dvec2(0, 0), L"Закрыть");
+    gitOutputWindow->addChild(closeButton);
+    closeButton->eventManager().subscribe<vgui::Button::Click_Event>(this, [this](const vgui::Button::Click_Event &) {
+        gitOutputWindow->setVisible(false);
+    });
+    gitOutputWindow->setStandardWidgetSize(vgui::MySize<double>(windowWidth, std::min(720.0, y + 34 + 56)));
+    gitOutputWindow->setVisible(true);
+}
+
+
+// Список коммитов для сравнения над полосой снизу
+void App::openCommitList() {
+    constexpr double windowWidth = 620;
+    constexpr double left = 12;
+    constexpr double rowHeight = 28;
+    constexpr int maxCommits = 150;
+    constexpr double maxWindowHeight = 440;
+    constexpr size_t maxSubjectLength = 52;
+    commitListWindow->removeAllChildren();
+    double width = windowWidth - 2 * left - 14;
+    double y = 10;
+    int rowIndex = 0;
+
+    auto addRow = [&](const std::wstring &text, const std::string &target, const std::wstring &toolTip) {
+        bool isActive = target == compareTarget;
+        if (isActive || rowIndex % 2 == 0) {
+            auto *stripe = new vgui::Label(vgui::MySize<double>(width, rowHeight), glm::dvec2(left, y), fixedSize, inParent);
+            stripe->setBackgroundColor(isActive ? vgui::Pixel(222, 232, 250) : vgui::Pixel(242, 238, 231));
+            commitListWindow->addChild(stripe);
+        }
+        ++rowIndex;
+        auto *button = new vgui::Button(vgui::MySize<double>(width, rowHeight), glm::dvec2(left, y), fixedSize, inParent, glm::dvec2(0, 0), text, true);
+        button->setFontSize(13);
+        button->setTextAlignedLeft(true);
+        button->setToolTip(toolTip);
+        button->eventManager().subscribe<vgui::Button::Click_Event>(this, [this, target](const vgui::Button::Click_Event &) {pendingCompareTarget = target;});
+        commitListWindow->addChild(button);
+        y += rowHeight;
+    };
+    addRow(L"Прошлый коммит" + (previousCommit.empty() ? std::wstring() : L"  ·  " + stringToWString(previousCommit.substr(0, 7))), "previous",
+           L"Коммит перед последним: после нового коммита сравнение сдвигается само");
+    if (!beforePullCommit.empty())
+        addRow(L"До последнего pull  ·  " + stringToWString(beforePullCommit.substr(0, 7)), beforePullCommit, L"Что было до последнего pull, который принёс коммиты");
+
+    y += 10;
+    auto *title = new vgui::Label(vgui::MySize<double>(width, 22), glm::dvec2(left, y), fixedSize, inParent, glm::dvec2(0, 0), L"Коммиты ветки");
+    title->setFontSize(12);
+    title->setTextColor(mutedColor);
+    commitListWindow->addChild(title);
+    y += 26;
+    rowIndex = 0;
+    for (const GitCommit &commit : Git::listCommits(project.root, maxCommits)) {
+        std::time_t time = std::time_t(commit.time);
+        char date[32];
+        std::strftime(date, sizeof(date), "%d.%m.%y %H:%M", std::localtime(&time));
+        std::wstring subject = stringToWString(commit.subject);
+        if (subject.size() > maxSubjectLength)
+            subject = subject.substr(0, maxSubjectLength - 1) + L"…";
+        std::wstring mark = commit.hash == headCommit ? L"  (HEAD)" : std::wstring();
+        addRow(stringToWString(commit.hash.substr(0, 7) + "  " + date + "  ") + subject + mark, commit.hash,
+               stringToWString(commit.author + ": " + commit.subject));
+    }
+    commitListWindow->setStandardWidgetSize(vgui::MySize<double>(windowWidth, std::min(maxWindowHeight, y + 56)));
+    commitListWindow->setVisible(true);
+}
+
+
+// Запомнить выбор сравнения и HEAD до pull (папка данных проекта)
+void App::saveGitChoice() {
+    std::filesystem::path path = std::filesystem::path(project.dataDir) / "git.txt";
+    std::error_code errorCode;
+    std::filesystem::create_directories(path.parent_path(), errorCode);
+    std::ofstream file(path, std::ios::binary);
+    file << "compare\t" << escapeField(compareTarget) << "\nbefore_pull\t" << escapeField(beforePullCommit) << '\n';
+}
+
+
+// Список ранее открытых проектов: в файл и в список сверху
+void App::updateRecentProjects(const std::wstring &openedRoot) {
+    constexpr size_t maxProjects = 12;
+    constexpr size_t maxTextLength = 30; // Знаков в строке списка: имя папки и путь до неё
+    std::vector<std::wstring> projects{openedRoot};
+    std::ifstream input(recentProjectFile(), std::ios::binary);
+    std::string line;
+    std::error_code errorCode;
+    while (std::getline(input, line) && projects.size() < maxProjects) {
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+        std::wstring root = stringToWString(line);
+        if (!root.empty() && std::find(projects.begin(), projects.end(), root) == projects.end() && std::filesystem::is_directory(root, errorCode))
+            projects.push_back(root);
+    }
+    input.close();
+    std::ofstream output(recentProjectFile(), std::ios::binary);
+    for (const std::wstring &root : projects)
+        output << wstringToString(root) << '\n';
+
+    // В списке: имя папки и путь до неё (длинный - с конца)
+    recentProjects = projects;
+    recentCombo->clearItems();
+    for (size_t i = 0; i < projects.size(); ++i) {
+        std::filesystem::path root(projects[i]);
+        std::wstring name = root.filename().wstring();
+        std::wstring parent = root.parent_path().generic_wstring();
+        size_t parentLength = maxTextLength > name.size() + 8 ? maxTextLength - name.size() - 3 : 5;
+        if (parent.size() > parentLength)
+            parent = L"…" + parent.substr(parent.size() - parentLength + 1);
+        recentCombo->addItem(name + L"  " + parent, std::any(), i == 0);
+    }
 }
 
 
@@ -912,13 +1577,13 @@ void App::rebuildDetails() {
     };
 
     // Нет карты
-    if (shownSnapshot < 0) {
+    if (shownGraph.nodes.empty()) {
         addLabel(L"Карты ещё нет", 18, inkColor);
         y += 8;
         addParagraph(L"1. В CMakeLists.txt проекта: set(CMAKE_EXPORT_COMPILE_COMMANDS ON) и собрать (Ninja или Makefile) - появится "
                      L"compile_commands.json в папке сборки.\n2. Открыть папку проекта и нажать «Сканировать». Папку сборки CodeAtlas ищет сам; "
-                     L"не нашёл - указать её compile_commands.json кнопкой «…».\n3. По желанию в корне проекта codeatlas.yaml: исключения, "
-                     L"вызовы компонентов (docs/PROJECT_TEMPLATE.md).\n\nРаскладка и история хранятся у CodeAtlas (Projects рядом с программой), "
+                     L"не нашёл - указать её compile_commands.json кнопкой «Открыть».\n3. По желанию в корне проекта codeatlas.yaml: исключения, "
+                     L"вызовы компонентов (docs/PROJECT_TEMPLATE.md).\n\nРаскладка и разбор хранятся у CodeAtlas (Projects рядом с программой), "
                      L"в проект ничего не пишется.", 14, inkColor);
         return;
     }
@@ -984,9 +1649,10 @@ void App::rebuildDetails() {
         addLegendRow("component", L"компонент");
         addLegendRow("event", L"событие");
         y += 6;
-        addLegendRow("added", L"новое с прошлого снимка");
+        addLegendRow("added", L"новое с выбранного коммита");
         addLegendRow("changed", L"изменённое");
         addLegendRow("removed", L"удалённое");
+        addLegendRow("uncommitted", L"не закоммичено");
 
         y += 14;
         addLabel(L"УПРАВЛЕНИЕ", 12, accentColor);
@@ -1006,10 +1672,12 @@ void App::rebuildDetails() {
     std::wstring kindText = kindNames[int(node.kind)];
     if (mapView.isDiffShown && nodeIndex < int(mapView.diffStates.size())) {
         if (mapView.diffStates[nodeIndex] == DiffState::Added)
-            kindText += L" - новая в снимке";
+            kindText += L" - новое";
         else if (mapView.diffStates[nodeIndex] == DiffState::Changed)
-            kindText += L" - изменена в снимке";
+            kindText += L" - изменено";
     }
+    if (mapView.isUncommittedShown && nodeIndex < int(mapView.uncommittedNodes.size()) && mapView.uncommittedNodes[nodeIndex])
+        kindText += L", не в коммите";
     // Шапка: вид плашкой, владелец (класс, пространство имён) мелко, само имя крупно
     {
         glm::ivec3 kindColor = kindColors[int(node.kind)];
@@ -1202,6 +1870,13 @@ int App::run(const std::wstring &projectRoot) {
 #endif
     Debug() << "CodeAtlas: запуск";
     settings().load();
+
+    // git не спрашивает пароль в невидимой консоли (повис бы): нужен - ошибка в окне вывода, менеджер учёток Windows показывает своё окно
+#ifdef _WIN32
+    _wputenv_s(L"GIT_TERMINAL_PROMPT", L"0");
+#else
+    setenv("GIT_TERMINAL_PROMPT", "0", 1);
+#endif
     if (!initWindow())
         return 1;
     Debug() << "CodeAtlas: окно" << windowSize.x << "x" << windowSize.y << ", OpenGL" << reinterpret_cast<const char*>(glGetString(GL_VERSION));
@@ -1219,7 +1894,7 @@ int App::run(const std::wstring &projectRoot) {
     if (!root.empty())
         openProject(std::filesystem::absolute(std::filesystem::path(root)).generic_wstring());
     else
-        statusLabel->setText(L"Указать папку проекта и «Открыть»");
+        statusLabel->setText(L"«Открыть» - выбрать CMakeLists.txt проекта");
     if (isDetailsDirty)
         rebuildDetails();
     Debug() << "CodeAtlas: интерфейс готов";
@@ -1227,10 +1902,10 @@ int App::run(const std::wstring &projectRoot) {
 
     Uint64 previousTicks = SDL_GetPerformanceCounter();
     while (isRunning) {
-        // Без движения на экране окно ждёт событий (кадр раз в 100 мс - для мигания каретки и подсказок, при сканировании - раз в 50 мс
+        // Без движения на экране окно ждёт событий (кадр раз в 100 мс - для мигания каретки и подсказок, при фоновой работе - раз в 50 мс
         // для хода: кадры подряд отнимали бы у разбора процессор)
         SDL_Event event;
-        bool hasEvent = mapView.isAnimating() ? SDL_PollEvent(&event) : SDL_WaitEventTimeout(&event, isScanning ? 50 : 100);
+        bool hasEvent = mapView.isAnimating() ? SDL_PollEvent(&event) : SDL_WaitEventTimeout(&event, jobKind != JobKind::None ? 50 : 100);
         while (hasEvent) {
             if (event.type == SDL_QUIT)
                 isRunning = false;
@@ -1242,6 +1917,7 @@ int App::run(const std::wstring &projectRoot) {
 
             // Сначала интерфейс; нажатия и колесо над ним холсту не идут, движение и отпускание - идут (дотащить начатое)
             bool wasSearchFocused = gui->context().focusedWidget() == searchEdit;
+            bool wasCommitFocused = gui->context().focusedWidget() == commitEdit;
             bool wasKeyboardCaptured = gui->isKeyboardCaptured();
             bool isOverGui = isCursorOverGui();
             bool isGuiProcessed = gui->handleEvent(event);
@@ -1252,6 +1928,8 @@ int App::run(const std::wstring &projectRoot) {
             if (event.type == SDL_KEYDOWN) {
                 if (wasSearchFocused && event.key.keysym.sym == SDLK_RETURN)
                     showNextSearchResult();
+                else if (wasCommitFocused && event.key.keysym.sym == SDLK_RETURN)
+                    requestGitCommand(GitCommand::Commit);
                 else if (!wasKeyboardCaptured && !gui->isKeyboardCaptured())
                     handleCanvasKey(event.key);
             }
@@ -1283,11 +1961,21 @@ int App::run(const std::wstring &projectRoot) {
                 isDetailsDirty = true;
             }
         }
-        if (pendingSnapshot >= 0) {
-            showSnapshot(pendingSnapshot);
-            pendingSnapshot = -1;
+        if (!pendingProject.empty()) {
+            std::wstring root = pendingProject;
+            pendingProject.clear();
+            openProject(root);
         }
-        pollScan();
+        if (!pendingCompareTarget.empty()) {
+            compareTarget = pendingCompareTarget;
+            pendingCompareTarget.clear();
+            commitListWindow->setVisible(false);
+            saveGitChoice();
+            updateComparison();
+        }
+        checkChanges();
+        pollJob();
+        startNextJob();
         if (isDetailsDirty)
             rebuildDetails();
 
@@ -1305,9 +1993,10 @@ int App::run(const std::wstring &projectRoot) {
         }
     }
 
-    if (isScanning) {
+    waitChangeCheck();
+    if (jobKind != JobKind::None) {
         analyzer.isStopRequested = true;
-        scanThread.join();
+        jobThread.join();
     }
     saveLayout();
     if (isSettingsChanged)

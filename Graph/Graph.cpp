@@ -43,12 +43,8 @@ bool Graph::save(const std::wstring &path) const {
     // Строка узла: N, id, вид, имя, полное имя, сигнатура, файл, строка, хэш тела, комментарий, строк в определении;
     // строка связи: E, id источника, id приёмника, вид, порядок
     file << "codeatlas-graph\t2\n";
-    for (const GraphNode &node : nodes) {
-        file << "N\t" << escapeField(node.id) << '\t' << int(node.kind) << '\t' << escapeField(wstringToString(node.name)) << '\t'
-             << escapeField(wstringToString(node.qualifiedName)) << '\t' << escapeField(wstringToString(node.signature)) << '\t'
-             << escapeField(wstringToString(node.file)) << '\t' << node.line << '\t' << node.bodyHash << '\t'
-             << escapeField(wstringToString(node.comment)) << '\t' << node.lineCount << '\n';
-    }
+    for (const GraphNode &node : nodes)
+        writeNode(file, node);
     for (const GraphEdge &edge : edges) {
         file << "E\t" << escapeField(nodes[edge.from].id) << '\t' << escapeField(nodes[edge.to].id) << '\t' << int(edge.kind) << '\t' << edge.order << '\n';
     }
@@ -72,18 +68,7 @@ bool Graph::load(const std::wstring &path) {
         std::vector<std::string> fields = splitFields(line);
 
         if (fields.size() >= 10 && fields[0] == "N") {
-            GraphNode node;
-            node.id = fields[1];
-            node.kind = NodeKind(std::stoi(fields[2]));
-            node.name = stringToWString(fields[3]);
-            node.qualifiedName = stringToWString(fields[4]);
-            node.signature = stringToWString(fields[5]);
-            node.file = stringToWString(fields[6]);
-            node.line = std::stoi(fields[7]);
-            node.bodyHash = std::stoull(fields[8]);
-            node.comment = stringToWString(fields[9]);
-            node.lineCount = fields.size() >= 11 ? std::atoi(fields[10].c_str()) : 0;
-            addNode(node);
+            addNode(readNode(fields));
         } else if (fields.size() >= 5 && fields[0] == "E") {
             int from = findNode(fields[1]);
             int to = findNode(fields[2]);
@@ -92,4 +77,47 @@ bool Graph::load(const std::wstring &path) {
         }
     }
     return true;
+}
+
+
+// Строка узла в текстовом файле: N, id, вид, имя, полное имя, сигнатура, файл, строка, хэш тела, комментарий, строк в определении
+void Graph::writeNode(std::ostream &stream, const GraphNode &node) {
+    stream << "N\t" << escapeField(node.id) << '\t' << int(node.kind) << '\t' << escapeField(wstringToString(node.name)) << '\t'
+           << escapeField(wstringToString(node.qualifiedName)) << '\t' << escapeField(wstringToString(node.signature)) << '\t'
+           << escapeField(wstringToString(node.file)) << '\t' << node.line << '\t' << node.bodyHash << '\t'
+           << escapeField(wstringToString(node.comment)) << '\t' << node.lineCount << '\n';
+}
+
+// Узел из полей строки узла (полей не меньше 10)
+GraphNode Graph::readNode(const std::vector<std::string> &fields) {
+    GraphNode node;
+    node.id = fields[1];
+    node.kind = NodeKind(std::atoi(fields[2].c_str()));
+    node.name = stringToWString(fields[3]);
+    node.qualifiedName = stringToWString(fields[4]);
+    node.signature = stringToWString(fields[5]);
+    node.file = stringToWString(fields[6]);
+    node.line = std::atoi(fields[7].c_str());
+    node.bodyHash = std::strtoull(fields[8].c_str(), nullptr, 10);
+    node.comment = stringToWString(fields[9]);
+    node.lineCount = fields.size() >= 11 ? std::atoi(fields[10].c_str()) : 0;
+    return node;
+}
+
+
+// Сравнение: состояние узлов current относительно previous и узлы previous, которых нет в current
+void Graph::compare(const Graph &previous, const Graph &current, std::vector<DiffState> &currentStates, std::vector<int> &removedPreviousNodes) {
+    currentStates.assign(current.nodes.size(), DiffState::Same);
+    removedPreviousNodes.clear();
+    for (int nodeIndex = 0; nodeIndex < int(current.nodes.size()); ++nodeIndex) {
+        int previousIndex = previous.findNode(current.nodes[nodeIndex].id);
+        if (previousIndex < 0)
+            currentStates[nodeIndex] = DiffState::Added;
+        else if (previous.nodes[previousIndex].bodyHash != current.nodes[nodeIndex].bodyHash)
+            currentStates[nodeIndex] = DiffState::Changed;
+    }
+    for (int previousIndex = 0; previousIndex < int(previous.nodes.size()); ++previousIndex) {
+        if (current.findNode(previous.nodes[previousIndex].id) < 0)
+            removedPreviousNodes.push_back(previousIndex);
+    }
 }

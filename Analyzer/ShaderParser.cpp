@@ -6,7 +6,13 @@ bool ShaderParser::parse(const std::filesystem::path &path, ShaderFile &file) {
     std::ifstream stream(path, std::ios::binary);
     if (!stream)
         return false;
-    std::string text((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+    parseText(std::string((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>()), file);
+    return true;
+}
+
+
+// Разбор текста шейдера (файл другой версии проекта)
+void ShaderParser::parseText(const std::string &text, ShaderFile &file) {
     file = ShaderFile();
 
     auto isIdentifierStart = [](char character) {return (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') || character == '_';};
@@ -294,7 +300,6 @@ bool ShaderParser::parse(const std::filesystem::path &path, ShaderFile &file) {
         i = close < code.size() ? close : code.size() - 1;
         declarationStart = i + 1;
     }
-    return true;
 }
 
 

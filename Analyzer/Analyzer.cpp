@@ -29,47 +29,20 @@ uint64_t hashText(const char *text, size_t size) {
 
 // Единица трансляции из compile_commands.json: исходник и флаги для libclang
 struct Unit {
-    std::string file;
+    std::string file;          // Полный путь
+    std::wstring relativeFile; // Путь от корня проекта
     std::vector<std::string> arguments;
 };
 
-// Вызов, найденный в теле функции: связь ставится после всех единиц, когда известны все определения
-struct PendingCall {
-    std::string callerId;
-    std::string calleeId;
-    int order;
-};
-
-// Чтение или запись данных типа функцией
-struct PendingAccess {
-    std::string functionId;
-    std::string typeId;
-    bool isWrite;
-};
-
-// Шейдеры в C++: имя шейдера строкой (как в файле имён или путь) в теле функции; в вызове - ещё define строками
-// ("#define X") и переменная программы первым аргументом: функции, которые к ней обращаются, тоже запускают этот шейдер
-struct PendingShaderUse {
-    std::string functionId;
-    std::vector<std::string> shaderNames;
-    std::set<std::string> defines;
-    std::string programId;
-};
-
-// Обращение функции к полю или переменной с типом-структурой (вдруг это программа шейдера)
-struct PendingVariableUse {
-    std::string functionId;
-    std::string variableId;
-};
-
-// Что собрал один поток
+// Что собрал один поток: узлы и что делают функции, файлы проекта, подключённые в каждой разобранной единице
 struct WorkerResult {
     std::vector<GraphNode> nodes;
     std::vector<PendingCall> calls;
     std::vector<PendingAccess> accesses;
-    std::set<std::string> componentTypeIds; // Типы из шаблонных аргументов вызовов компонентов
+    std::vector<PendingComponent> components;
     std::vector<PendingShaderUse> shaderUses;
     std::vector<PendingVariableUse> variableUses;
+    std::map<std::wstring, std::vector<std::wstring>> unitIncludes;
 };
 
 // Шейдеры проекта: разобранные файлы по пути от корня и путь по имени, каким шейдер зовут в коде (имя из файла имён, путь, имя файла)
@@ -120,13 +93,14 @@ public:
         clang_disposeIndex(index);
     }
 
-    // Разбор и обход одной единицы; false - libclang её не разобрал совсем
-    bool parse(const Unit &unit, bool &hasErrors) {
+    // Разбор и обход одной единицы (с подменёнными файлами - другая версия проекта); false - libclang её не разобрал совсем
+    bool parse(const Unit &unit, std::vector<CXUnsavedFile> &unsavedFiles, bool &hasErrors) {
         std::vector<const char*> arguments;
         for (const std::string &argument : unit.arguments)
             arguments.push_back(argument.c_str());
         unsigned options = CXTranslationUnit_KeepGoing | CXTranslationUnit_IgnoreNonErrorsFromIncludedFiles;
-        CXErrorCode code = clang_parseTranslationUnit2(index, unit.file.c_str(), arguments.data(), int(arguments.size()), nullptr, 0, options, &unit_);
+        CXErrorCode code = clang_parseTranslationUnit2(index, unit.file.c_str(), arguments.data(), int(arguments.size()), unsavedFiles.data(),
+                                                       unsigned(unsavedFiles.size()), options, &unit_);
         if (code != CXError_Success || unit_ == nullptr) {
             Debug() << "Не разобран" << unit.file << ", код libclang" << int(code);
             return false;
@@ -146,6 +120,22 @@ public:
         }
 
         clang_visitChildren(clang_getTranslationUnitCursor(unit_), &UnitParser::visitTop, this);
+
+        // Подключённые файлы проекта: по ним правка заголовка находит единицу, через которую его пересканировать
+        std::set<std::wstring> includes;
+        struct InclusionCollect {
+            UnitParser *parser;
+            std::set<std::wstring> *includes;
+        } collect{this, &includes};
+        clang_getInclusions(unit_, [](CXFile includedFile, CXSourceLocation *, unsigned stackSize, CXClientData data) {
+            InclusionCollect *collect = static_cast<InclusionCollect*>(data);
+            if (stackSize == 0)
+                return;
+            std::wstring relative = collect->parser->relativePath(takeString(clang_getFileName(includedFile)));
+            if (!relative.empty())
+                collect->includes->insert(relative);
+        }, &collect);
+        result.unitIncludes[unit.relativeFile] = std::vector<std::wstring>(includes.begin(), includes.end());
         clang_disposeTranslationUnit(unit_);
         unit_ = nullptr;
         return true;
@@ -170,7 +160,11 @@ private:
             *line = lineNumber;
         if (offset != nullptr)
             *offset = fileOffset;
-        std::string fileName = takeString(clang_getFileName(file));
+        return relativePath(takeString(clang_getFileName(file)));
+    }
+
+    // Путь файла от корня проекта по полному пути (пусто - вне проекта)
+    std::wstring relativePath(const std::string &fileName) {
         auto found = relativePaths.find(fileName);
         if (found != relativePaths.end())
             return found->second;
@@ -579,7 +573,7 @@ private:
                         if ((typeKind != CXCursor_StructDecl && typeKind != CXCursor_ClassDecl) || !collect->parser->isInProject(type))
                             return CXChildVisit_Continue;
                         std::string typeId = nodeId(type);
-                        collect->parser->result.componentTypeIds.insert(typeId);
+                        collect->parser->result.components.push_back(PendingComponent{collect->function->functionId, typeId});
                         bool isWrite = collect->isWriteCall && !collect->parser->isPrecededByConst(reference);
                         collect->parser->addAccess(*collect->function, typeId, isWrite);
                         return CXChildVisit_Continue;
@@ -636,8 +630,8 @@ private:
 
 
 // Шейдеры проекта: файлы с расширениями шейдеров из папок шейдеров шаблона (нет - весь проект без исключённых, скрытых и папок
-// сборки), разобранные; имена из файлов имён (.rc), пути от корня и имена файлов
-ShaderCatalog collectShaders(const ProjectTemplate &project) {
+// сборки), разобранные (той версии проекта, что в versions); имена из файлов имён (.rc), пути от корня и имена файлов
+ShaderCatalog collectShaders(const ProjectTemplate &project, const FileVersions &versions) {
     ShaderCatalog catalog;
     std::filesystem::path root(project.root);
     std::error_code errorCode;
@@ -673,14 +667,40 @@ ShaderCatalog collectShaders(const ProjectTemplate &project) {
             std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
             if (extensions.count(extension) == 0)
                 continue;
-            ShaderFile file;
-            if (!ShaderParser::parse(path, file))
-                continue;
             std::wstring relative = path.lexically_normal().lexically_relative(root).generic_wstring();
+            if (versions.absentFiles.count(relative) > 0)
+                continue;
+            ShaderFile file;
+            auto version = versions.contents.find(relative);
+            if (version != versions.contents.end())
+                ShaderParser::parseText(version->second, file);
+            else if (!ShaderParser::parse(path, file))
+                continue;
             catalog.files[relative] = file;
             catalog.fileByName[wstringToString(relative)] = relative;
             catalog.fileByName.emplace(path.filename().string(), relative);
         }
+    }
+
+    // Шейдеры той версии, которых на диске уже нет
+    for (const auto &[relative, text] : versions.contents) {
+        std::filesystem::path path(relative);
+        std::string extension = path.extension().string();
+        std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
+        if (extensions.count(extension) == 0 || catalog.files.count(relative) > 0)
+            continue;
+        bool isInShaderDir = project.shaderDirs.empty();
+        for (const std::wstring &folder : project.shaderDirs) {
+            std::wstring prefix = std::filesystem::path(folder).generic_wstring() + L"/";
+            isInShaderDir = isInShaderDir || relative.rfind(prefix, 0) == 0;
+        }
+        if (!isInShaderDir)
+            continue;
+        ShaderFile file;
+        ShaderParser::parseText(text, file);
+        catalog.files[relative] = file;
+        catalog.fileByName[wstringToString(relative)] = relative;
+        catalog.fileByName.emplace(path.filename().string(), relative);
     }
     if (catalog.files.empty())
         return catalog;
@@ -717,7 +737,7 @@ ShaderCatalog collectShaders(const ProjectTemplate &project) {
 
 // Узлы функций шейдеров и связи: вызовы внутри шейдеров (по подключениям), из C++ - к main шейдера (с подходящими define):
 // из функции, где шейдер собирается или назван, и из функций, которые обращаются к переменной его программы
-void addShaders(const ShaderCatalog &catalog, const std::vector<WorkerResult> &results, Graph &graph) {
+void addShaders(const ShaderCatalog &catalog, const ScanState &state, Graph &graph) {
     if (catalog.files.empty())
         return;
 
@@ -831,8 +851,8 @@ void addShaders(const ShaderCatalog &catalog, const std::vector<WorkerResult> &r
         return compiled.empty() ? all : compiled;
     };
     std::map<std::string, std::set<int>> mainsOfProgram;
-    for (const WorkerResult &result : results) {
-        for (const PendingShaderUse &use : result.shaderUses) {
+    for (const auto &[file, fileScan] : state.files) {
+        for (const PendingShaderUse &use : fileScan.shaderUses) {
             int from = graph.findNode(use.functionId);
             for (const std::string &shaderName : use.shaderNames) {
                 for (int mainIndex : mainsOf(shaderName, use.defines)) {
@@ -844,8 +864,8 @@ void addShaders(const ShaderCatalog &catalog, const std::vector<WorkerResult> &r
             }
         }
     }
-    for (const WorkerResult &result : results) {
-        for (const PendingVariableUse &use : result.variableUses) {
+    for (const auto &[file, fileScan] : state.files) {
+        for (const PendingVariableUse &use : fileScan.variableUses) {
             auto program = mainsOfProgram.find(use.variableId);
             int from = program == mainsOfProgram.end() ? -1 : graph.findNode(use.functionId);
             if (from < 0)
@@ -854,6 +874,244 @@ void addShaders(const ShaderCatalog &catalog, const std::vector<WorkerResult> &r
                 graph.addEdge(from, mainIndex, EdgeKind::Call, 0);
         }
     }
+}
+
+
+// Время правки файла, тики часов файловой системы; 0 - файла нет
+int64_t fileWriteTime(const std::filesystem::path &path) {
+    std::error_code errorCode;
+    std::filesystem::file_time_type time = std::filesystem::last_write_time(path, errorCode);
+    return errorCode ? 0 : int64_t(time.time_since_epoch().count());
+}
+
+// Единицы проекта из compile_commands.json с флагами для libclang; error - причина, если не вышло
+bool loadUnits(const ProjectTemplate &project, std::vector<Unit> &units, std::filesystem::path &compileCommandsPath, std::wstring &error) {
+    std::filesystem::path compileDir = Analyzer::findCompileCommandsDir(project);
+    if (compileDir.empty()) {
+        error = L"Не найден compile_commands.json: в CMakeLists.txt проекта set(CMAKE_EXPORT_COMPILE_COMMANDS ON), генератор Ninja, пересобрать; "
+                L"файл указать кнопкой «Открыть»";
+        return false;
+    }
+    compileCommandsPath = compileDir / "compile_commands.json";
+    CXCompilationDatabase_Error databaseError;
+    CXCompilationDatabase database = clang_CompilationDatabase_fromDirectory(compileDir.string().c_str(), &databaseError);
+    if (databaseError != CXCompilationDatabase_NoError) {
+        error = L"Не читается " + compileCommandsPath.wstring();
+        return false;
+    }
+
+    // Флаги для libclang: из команды сборки остаются пути заголовков, определения, стандарт и опции языка (остальное у GCC и MSVC своё)
+    std::string resourceDir = Analyzer::findClangResourceDir();
+    units.clear();
+    CXCompileCommands commands = clang_CompilationDatabase_getAllCompileCommands(database);
+    unsigned commandsCount = clang_CompileCommands_getSize(commands);
+    std::set<std::string> seenFiles;
+    for (unsigned commandIndex = 0; commandIndex < commandsCount; ++commandIndex) {
+        CXCompileCommand command = clang_CompileCommands_getCommand(commands, commandIndex);
+        std::filesystem::path directory = takeString(clang_CompileCommand_getDirectory(command));
+        std::filesystem::path file = takeString(clang_CompileCommand_getFilename(command));
+        if (file.is_relative())
+            file = directory / file;
+        file = file.lexically_normal();
+        if (project.projectRelativePath(file.wstring()).empty() || !seenFiles.insert(file.string()).second)
+            continue;
+
+        // Абсолютный путь из пути команды (папка команды для libclang текущей не станет: потоки общие)
+        auto absolutePath = [&](const std::string &path) {
+            std::filesystem::path result = path;
+            return result.is_relative() ? (directory / result).lexically_normal().string() : path;
+        };
+
+        Unit unit;
+        unit.file = file.string();
+        unit.relativeFile = project.projectRelativePath(file.wstring());
+        unsigned argumentsCount = clang_CompileCommand_getNumArgs(command);
+        std::string compiler = argumentsCount > 0 ? takeString(clang_CompileCommand_getArg(command, 0)) : std::string();
+        std::string compilerName = std::filesystem::path(compiler).filename().string();
+        std::transform(compilerName.begin(), compilerName.end(), compilerName.begin(), ::tolower);
+        bool isMsvc = compilerName == "cl.exe" || compilerName == "cl" || compilerName == "clang-cl.exe" || compilerName == "clang-cl";
+        if (isMsvc)
+            unit.arguments.push_back("--driver-mode=cl");
+
+        for (unsigned argumentIndex = 1; argumentIndex < argumentsCount; ++argumentIndex) {
+            std::string argument = takeString(clang_CompileCommand_getArg(command, argumentIndex));
+            std::string next = argumentIndex + 1 < argumentsCount ? takeString(clang_CompileCommand_getArg(command, argumentIndex + 1)) : std::string();
+
+            // Флаг с путём отдельным словом
+            if (argument == "-I" || argument == "-isystem" || argument == "-iquote" || argument == "-idirafter" || argument == "-include" ||
+                argument == "/I" || argument == "/FI" || argument == "-external:I" || argument == "/external:I") {
+                std::string flag = argument == "/I" ? "-I" : argument == "/FI" ? "-include" : argument == "-external:I" || argument == "/external:I" ? "-isystem" : argument;
+                unit.arguments.push_back(flag);
+                unit.arguments.push_back(absolutePath(next));
+                ++argumentIndex;
+                continue;
+            }
+            // Флаг с путём слитно
+            bool isMatched = false;
+            for (const char *prefix : {"-I", "/I", "-isystem", "/external:I", "-external:I", "/FI", "-FI", "-include"}) {
+                std::string prefixText = prefix;
+                if (argument.size() > prefixText.size() && argument.rfind(prefixText, 0) == 0) {
+                    std::string flag = prefixText == "/I" || prefixText == "-I" ? "-I" :
+                                       prefixText == "/FI" || prefixText == "-FI" || prefixText == "-include" ? "-include" : "-isystem";
+                    unit.arguments.push_back(flag);
+                    unit.arguments.push_back(absolutePath(argument.substr(prefixText.size())));
+                    isMatched = true;
+                    break;
+                }
+            }
+            if (isMatched)
+                continue;
+            // Определения, стандарт, язык
+            bool isKept = argument.rfind("-D", 0) == 0 || argument.rfind("-U", 0) == 0 || argument.rfind("-std", 0) == 0;
+            if (isMsvc)
+                isKept = isKept || argument.rfind("/D", 0) == 0 || argument.rfind("/U", 0) == 0 || argument.rfind("/std:", 0) == 0 ||
+                         argument == "/TP" || argument == "-TP" || argument.rfind("/Zc:", 0) == 0 || argument.rfind("-Zc:", 0) == 0 ||
+                         argument.rfind("/EH", 0) == 0 || argument.rfind("-EH", 0) == 0 || argument == "/GR" || argument == "-GR" ||
+                         argument == "/permissive-" || argument == "-permissive-" || argument == "/utf-8" || argument == "-utf-8" ||
+                         argument == "/MD" || argument == "-MD" || argument == "/MDd" || argument == "-MDd" || argument == "/MT" ||
+                         argument == "-MT" || argument == "/MTd" || argument == "-MTd" || argument.rfind("/arch:", 0) == 0 || argument.rfind("-arch:", 0) == 0;
+            else
+                isKept = isKept || argument == "-x" || argument == "-pthread" || argument.rfind("-fms-", 0) == 0 || argument.rfind("-m", 0) == 0 ||
+                         argument == "-fexceptions" || argument == "-fno-exceptions" || argument == "-fno-rtti";
+            if (isKept) {
+                unit.arguments.push_back(argument);
+                if (argument == "-x" || argument == "-D" || argument == "-U" || argument == "/D" || argument == "/U") {
+                    unit.arguments.push_back(next);
+                    ++argumentIndex;
+                }
+            }
+        }
+        if (!resourceDir.empty()) {
+            unit.arguments.push_back("-resource-dir");
+            unit.arguments.push_back(resourceDir);
+        }
+        // Обычные комментарии тоже привязываются к объявлениям (через -Xclang: clang-cl флаг -fparse-all-comments молча пропускает); предупреждения не нужны
+        unit.arguments.push_back("-Xclang");
+        unit.arguments.push_back("-fparse-all-comments");
+        unit.arguments.push_back("-Wno-everything");
+        units.push_back(unit);
+    }
+    clang_CompileCommands_dispose(commands);
+    clang_CompilationDatabase_dispose(database);
+
+
+    if (units.empty()) {
+        error = L"В " + compileCommandsPath.wstring() + L" нет файлов проекта";
+        return false;
+    }
+    return true;
+}
+
+// Разбор единиц в потоках (каждый со своим CXIndex), файлы из versions подменяются их текстом; false - остановлено
+bool parseUnits(Analyzer &analyzer, const ProjectTemplate &project, const std::vector<Unit> &units, const ShaderCatalog &shaders,
+                const FileVersions &versions, std::vector<WorkerResult> &results) {
+    analyzer.unitsTotal = int(units.size());
+    analyzer.unitsDone = 0;
+    analyzer.unitsWithErrors = 0;
+    if (!units.empty()) {
+        std::string arguments;
+        for (const std::string &argument : units[0].arguments)
+            arguments += argument + " ";
+        Debug() << "Разбор:" << units.size() << "единиц, флаги первой:" << units[0].file << arguments;
+    }
+
+    // Подменённые файлы для libclang: полный путь и текст той версии (общие для потоков: libclang их только читает)
+    std::vector<std::string> unsavedPaths;
+    for (const auto &[relative, text] : versions.contents)
+        unsavedPaths.push_back((std::filesystem::path(project.root) / relative).lexically_normal().make_preferred().string());
+    std::vector<CXUnsavedFile> unsavedFiles;
+    int unsavedIndex = 0;
+    for (const auto &[relative, text] : versions.contents) {
+        unsavedFiles.push_back(CXUnsavedFile{unsavedPaths[unsavedIndex].c_str(), text.data(), (unsigned long)text.size()});
+        ++unsavedIndex;
+    }
+
+    SharedScan shared;
+    shared.shaders = &shaders;
+    shared.project = &project;
+    shared.componentCalls = std::set<std::string>(project.componentCalls.begin(), project.componentCalls.end());
+    shared.writeCalls = std::set<std::string>(project.writeCalls.begin(), project.writeCalls.end());
+    // Потоков по умолчанию - половина ядер, не больше 8: единица с тяжёлыми заголовками держит в libclang сотни мегабайт, и окну нужен свой проц
+    constexpr int maxThreads = 8;
+    int workersCount = analyzer.threadsCount > 0 ? analyzer.threadsCount : std::clamp(int(std::thread::hardware_concurrency()) / 2, 1, maxThreads);
+    workersCount = std::max(1, std::min(workersCount, int(units.size())));
+    results.assign(workersCount, WorkerResult());
+    std::atomic<int> nextUnit = 0;
+    std::vector<std::thread> threads;
+    for (int threadIndex = 0; threadIndex < workersCount; ++threadIndex) {
+        threads.emplace_back([&, threadIndex]() {
+#ifdef _WIN32
+            SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+#endif
+            UnitParser parser(shared, results[threadIndex]);
+            std::vector<CXUnsavedFile> threadUnsavedFiles = unsavedFiles;
+            while (!analyzer.isStopRequested) {
+                int unitIndex = nextUnit++;
+                if (unitIndex >= int(units.size()))
+                    break;
+                bool hasErrors = false;
+                if (!parser.parse(units[unitIndex], threadUnsavedFiles, hasErrors) || hasErrors)
+                    ++analyzer.unitsWithErrors;
+                ++analyzer.unitsDone;
+            }
+        });
+    }
+    for (std::thread &thread : threads)
+        thread.join();
+    return !analyzer.isStopRequested;
+}
+
+// Разобранное потоками - по файлам в state (keptFiles - какие файлы заменить, остальное отбрасывается; nullptr - все), подключения единиц
+void distributeResults(std::vector<WorkerResult> &results, const std::set<std::wstring> *keptFiles, ScanState &state) {
+    std::map<std::wstring, FileScan> files;
+    std::map<std::string, std::wstring> fileOfId;
+    for (WorkerResult &result : results) {
+        for (GraphNode &node : result.nodes) {
+            if (keptFiles != nullptr && keptFiles->count(node.file) == 0)
+                continue;
+            fileOfId[node.id] = node.file;
+            files[node.file].nodes.push_back(node);
+        }
+    }
+
+    // Вызовы, доступы и прочее - в файл функции, из которой они
+    auto fileScanOf = [&](const std::string &functionId) -> FileScan* {
+        auto found = fileOfId.find(functionId);
+        return found == fileOfId.end() ? nullptr : &files[found->second];
+    };
+    for (WorkerResult &result : results) {
+        for (PendingCall &call : result.calls) {
+            if (FileScan *fileScan = fileScanOf(call.callerId))
+                fileScan->calls.push_back(call);
+        }
+        for (PendingAccess &access : result.accesses) {
+            if (FileScan *fileScan = fileScanOf(access.functionId))
+                fileScan->accesses.push_back(access);
+        }
+        for (PendingComponent &component : result.components) {
+            if (FileScan *fileScan = fileScanOf(component.functionId))
+                fileScan->components.push_back(component);
+        }
+        for (PendingShaderUse &use : result.shaderUses) {
+            if (FileScan *fileScan = fileScanOf(use.functionId))
+                fileScan->shaderUses.push_back(use);
+        }
+        for (PendingVariableUse &use : result.variableUses) {
+            if (FileScan *fileScan = fileScanOf(use.functionId))
+                fileScan->variableUses.push_back(use);
+        }
+        for (auto &[unitFile, includes] : result.unitIncludes)
+            state.unitIncludes[unitFile] = includes;
+    }
+
+    if (keptFiles == nullptr) {
+        state.files = std::move(files);
+        return;
+    }
+    for (const std::wstring &file : *keptFiles)
+        state.files.erase(file);
+    for (auto &[file, fileScan] : files)
+        state.files[file] = std::move(fileScan);
 }
 
 
@@ -929,180 +1187,197 @@ std::string Analyzer::findClangResourceDir() {
 }
 
 
-// Сканирование проекта по compile_commands.json; error - причина, если не вышло
-bool Analyzer::scan(const ProjectTemplate &project, Graph &graph, std::wstring &error) {
-    unitsTotal = 0;
-    unitsDone = 0;
-    unitsWithErrors = 0;
+// Сканирование всего проекта по compile_commands.json; error - причина, если не вышло
+bool Analyzer::scan(const ProjectTemplate &project, ScanState &state, std::wstring &error) {
     isStopRequested = false;
-
-    std::filesystem::path compileDir = findCompileCommandsDir(project);
-    if (compileDir.empty()) {
-        error = L"Не найден compile_commands.json: в CMakeLists.txt проекта set(CMAKE_EXPORT_COMPILE_COMMANDS ON), генератор Ninja, пересобрать; "
-                L"файл указать кнопкой «…»";
-        return false;
-    }
-    CXCompilationDatabase_Error databaseError;
-    CXCompilationDatabase database = clang_CompilationDatabase_fromDirectory(compileDir.string().c_str(), &databaseError);
-    if (databaseError != CXCompilationDatabase_NoError) {
-        error = L"Не читается " + (compileDir / "compile_commands.json").wstring();
-        return false;
-    }
-
-    // Флаги для libclang: из команды сборки остаются пути заголовков, определения, стандарт и опции языка (остальное у GCC и MSVC своё)
-    std::string resourceDir = findClangResourceDir();
     std::vector<Unit> units;
-    CXCompileCommands commands = clang_CompilationDatabase_getAllCompileCommands(database);
-    unsigned commandsCount = clang_CompileCommands_getSize(commands);
-    std::set<std::string> seenFiles;
-    for (unsigned commandIndex = 0; commandIndex < commandsCount; ++commandIndex) {
-        CXCompileCommand command = clang_CompileCommands_getCommand(commands, commandIndex);
-        std::filesystem::path directory = takeString(clang_CompileCommand_getDirectory(command));
-        std::filesystem::path file = takeString(clang_CompileCommand_getFilename(command));
-        if (file.is_relative())
-            file = directory / file;
-        file = file.lexically_normal();
-        if (project.projectRelativePath(file.wstring()).empty() || !seenFiles.insert(file.string()).second)
-            continue;
-
-        // Абсолютный путь из пути команды (папка команды для libclang текущей не станет: потоки общие)
-        auto absolutePath = [&](const std::string &path) {
-            std::filesystem::path result = path;
-            return result.is_relative() ? (directory / result).lexically_normal().string() : path;
-        };
-
-        Unit unit;
-        unit.file = file.string();
-        unsigned argumentsCount = clang_CompileCommand_getNumArgs(command);
-        std::string compiler = argumentsCount > 0 ? takeString(clang_CompileCommand_getArg(command, 0)) : std::string();
-        std::string compilerName = std::filesystem::path(compiler).filename().string();
-        std::transform(compilerName.begin(), compilerName.end(), compilerName.begin(), ::tolower);
-        bool isMsvc = compilerName == "cl.exe" || compilerName == "cl" || compilerName == "clang-cl.exe" || compilerName == "clang-cl";
-        if (isMsvc)
-            unit.arguments.push_back("--driver-mode=cl");
-
-        for (unsigned argumentIndex = 1; argumentIndex < argumentsCount; ++argumentIndex) {
-            std::string argument = takeString(clang_CompileCommand_getArg(command, argumentIndex));
-            std::string next = argumentIndex + 1 < argumentsCount ? takeString(clang_CompileCommand_getArg(command, argumentIndex + 1)) : std::string();
-
-            // Флаг с путём отдельным словом
-            if (argument == "-I" || argument == "-isystem" || argument == "-iquote" || argument == "-idirafter" || argument == "-include" ||
-                argument == "/I" || argument == "/FI" || argument == "-external:I" || argument == "/external:I") {
-                std::string flag = argument == "/I" ? "-I" : argument == "/FI" ? "-include" : argument == "-external:I" || argument == "/external:I" ? "-isystem" : argument;
-                unit.arguments.push_back(flag);
-                unit.arguments.push_back(absolutePath(next));
-                ++argumentIndex;
-                continue;
-            }
-            // Флаг с путём слитно
-            bool isMatched = false;
-            for (const char *prefix : {"-I", "/I", "-isystem", "/external:I", "-external:I", "/FI", "-FI", "-include"}) {
-                std::string prefixText = prefix;
-                if (argument.size() > prefixText.size() && argument.rfind(prefixText, 0) == 0) {
-                    std::string flag = prefixText == "/I" || prefixText == "-I" ? "-I" :
-                                       prefixText == "/FI" || prefixText == "-FI" || prefixText == "-include" ? "-include" : "-isystem";
-                    unit.arguments.push_back(flag);
-                    unit.arguments.push_back(absolutePath(argument.substr(prefixText.size())));
-                    isMatched = true;
-                    break;
-                }
-            }
-            if (isMatched)
-                continue;
-            // Определения, стандарт, язык
-            bool isKept = argument.rfind("-D", 0) == 0 || argument.rfind("-U", 0) == 0 || argument.rfind("-std", 0) == 0;
-            if (isMsvc)
-                isKept = isKept || argument.rfind("/D", 0) == 0 || argument.rfind("/U", 0) == 0 || argument.rfind("/std:", 0) == 0 ||
-                         argument == "/TP" || argument == "-TP" || argument.rfind("/Zc:", 0) == 0 || argument.rfind("-Zc:", 0) == 0 ||
-                         argument.rfind("/EH", 0) == 0 || argument.rfind("-EH", 0) == 0 || argument == "/GR" || argument == "-GR" ||
-                         argument == "/permissive-" || argument == "-permissive-" || argument == "/utf-8" || argument == "-utf-8" ||
-                         argument == "/MD" || argument == "-MD" || argument == "/MDd" || argument == "-MDd" || argument == "/MT" ||
-                         argument == "-MT" || argument == "/MTd" || argument == "-MTd" || argument.rfind("/arch:", 0) == 0 || argument.rfind("-arch:", 0) == 0;
-            else
-                isKept = isKept || argument == "-x" || argument == "-pthread" || argument.rfind("-fms-", 0) == 0 || argument.rfind("-m", 0) == 0 ||
-                         argument == "-fexceptions" || argument == "-fno-exceptions" || argument == "-fno-rtti";
-            if (isKept) {
-                unit.arguments.push_back(argument);
-                if (argument == "-x" || argument == "-D" || argument == "-U" || argument == "/D" || argument == "/U") {
-                    unit.arguments.push_back(next);
-                    ++argumentIndex;
-                }
-            }
-        }
-        if (!resourceDir.empty()) {
-            unit.arguments.push_back("-resource-dir");
-            unit.arguments.push_back(resourceDir);
-        }
-        // Обычные комментарии тоже привязываются к объявлениям (через -Xclang: clang-cl флаг -fparse-all-comments молча пропускает); предупреждения не нужны
-        unit.arguments.push_back("-Xclang");
-        unit.arguments.push_back("-fparse-all-comments");
-        unit.arguments.push_back("-Wno-everything");
-        units.push_back(unit);
-    }
-    clang_CompileCommands_dispose(commands);
-    clang_CompilationDatabase_dispose(database);
-
-    if (units.empty()) {
-        error = L"В " + (compileDir / "compile_commands.json").wstring() + L" нет файлов проекта";
+    std::filesystem::path compileCommandsPath;
+    if (!loadUnits(project, units, compileCommandsPath, error))
         return false;
-    }
-    unitsTotal = int(units.size());
-    Debug() << "Сканирование:" << units.size() << "единиц, compile_commands -" << compileDir.string() << ", resource-dir:" << resourceDir;
-    if (!units.empty()) {
-        std::string arguments;
-        for (const std::string &argument : units[0].arguments)
-            arguments += argument + " ";
-        Debug() << "Флаги первой единицы:" << units[0].file << arguments;
-    }
+    Debug() << "Сканирование:" << units.size() << "единиц, compile_commands -" << compileCommandsPath.string() << ", resource-dir:" << findClangResourceDir();
 
     // Шейдеры разбираются сразу: их имена нужны потокам, чтобы узнавать имена шейдеров строками в C++
-    ShaderCatalog shaders = collectShaders(project);
-    Debug() << "Шейдеров:" << shaders.files.size() << ", имён:" << shaders.fileByName.size();
+    // Время правки единиц - до разбора: поправленная во время разбора при следующей проверке окажется правленой
+    std::filesystem::path root(project.root);
+    std::map<std::wstring, int64_t> unitTimes;
+    for (const Unit &unit : units)
+        unitTimes[unit.relativeFile] = fileWriteTime(root / unit.relativeFile);
 
-    // Разбор в потоках: каждый со своим CXIndex, результаты сливаются после
-    SharedScan shared;
-    shared.shaders = &shaders;
-    shared.project = &project;
-    shared.componentCalls = std::set<std::string>(project.componentCalls.begin(), project.componentCalls.end());
-    shared.writeCalls = std::set<std::string>(project.writeCalls.begin(), project.writeCalls.end());
-    // Потоков по умолчанию - половина ядер, не больше 8: единица с тяжёлыми заголовками держит в libclang сотни мегабайт, и окну нужен свой проц
-    constexpr int maxThreads = 8;
-    int workersCount = threadsCount > 0 ? threadsCount : std::clamp(int(std::thread::hardware_concurrency()) / 2, 1, maxThreads);
-    workersCount = std::max(1, std::min(workersCount, int(units.size())));
-    std::vector<WorkerResult> results(workersCount);
-    std::atomic<int> nextUnit = 0;
-    std::vector<std::thread> threads;
-    for (int threadIndex = 0; threadIndex < workersCount; ++threadIndex) {
-        threads.emplace_back([&, threadIndex]() {
-#ifdef _WIN32
-            SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
-#endif
-            UnitParser parser(shared, results[threadIndex]);
-            while (!isStopRequested) {
-                int unitIndex = nextUnit++;
-                if (unitIndex >= int(units.size()))
-                    break;
-                bool hasErrors = false;
-                if (!parser.parse(units[unitIndex], hasErrors) || hasErrors)
-                    ++unitsWithErrors;
-                ++unitsDone;
-            }
-        });
+    FileVersions diskVersion;
+    ShaderCatalog shaders = collectShaders(project, diskVersion);
+    Debug() << "Шейдеров:" << shaders.files.size() << ", имён:" << shaders.fileByName.size();
+    std::vector<WorkerResult> results;
+    if (!parseUnits(*this, project, units, shaders, diskVersion, results)) {
+        error = L"Сканирование остановлено";
+        return false;
     }
-    for (std::thread &thread : threads)
-        thread.join();
-    if (isStopRequested) {
+    state = ScanState();
+    distributeResults(results, nullptr, state);
+
+    // Время правки всех файлов разбора: по нему видно, какие поменялись
+    for (const auto &[unitFile, includes] : state.unitIncludes) {
+        auto unitTime = unitTimes.find(unitFile);
+        state.fileTimes[unitFile] = unitTime != unitTimes.end() ? unitTime->second : fileWriteTime(root / unitFile);
+        for (const std::wstring &include : includes)
+            state.fileTimes.emplace(include, fileWriteTime(root / include));
+    }
+    for (const auto &[shaderFile, shader] : shaders.files)
+        state.fileTimes[shaderFile] = fileWriteTime(root / shaderFile);
+    state.compileCommandsPath = compileCommandsPath.wstring();
+    state.compileCommandsTime = fileWriteTime(compileCommandsPath);
+    Debug() << "Сканирование: файлов с определениями" << state.files.size() << ", под слежением" << state.fileTimes.size()
+            << ", единиц с ошибками разбора:" << int(unitsWithErrors);
+    return true;
+}
+
+
+// Пересканирование файлов: единицы с ними (заголовок - через свою .cpp или другую единицу, которая его подключает), разобранное
+// по ним заменяется. versions - другая версия проекта (пусто - как на диске; тогда же подхватываются новые и убранные единицы)
+bool Analyzer::update(const ProjectTemplate &project, ScanState &state, const std::set<std::wstring> &files, const FileVersions &versions, std::wstring &error) {
+    isStopRequested = false;
+    std::vector<Unit> allUnits;
+    std::filesystem::path compileCommandsPath;
+    if (!loadUnits(project, allUnits, compileCommandsPath, error))
+        return false;
+    bool isDisk = versions.contents.empty() && versions.absentFiles.empty();
+    std::map<std::wstring, const Unit*> unitByFile;
+    for (const Unit &unit : allUnits)
+        unitByFile[unit.relativeFile] = &unit;
+    std::filesystem::path root(project.root);
+
+    // Единицы к разбору; разобранное по их файлам заменяется тоже
+    std::set<std::wstring> replacedFiles = files;
+    std::vector<Unit> units;
+    std::set<std::wstring> chosenUnits;
+    auto chooseUnit = [&](const Unit &unit) {
+        if (chosenUnits.insert(unit.relativeFile).second) {
+            units.push_back(unit);
+            replacedFiles.insert(unit.relativeFile);
+        }
+    };
+
+    // На диске: новые единицы из compile_commands.json разбираются, убранные забываются
+    if (isDisk) {
+        for (const Unit &unit : allUnits) {
+            if (state.unitIncludes.count(unit.relativeFile) == 0)
+                chooseUnit(unit);
+        }
+        for (auto iterator = state.unitIncludes.begin(); iterator != state.unitIncludes.end();) {
+            if (unitByFile.count(iterator->first) > 0) {
+                ++iterator;
+                continue;
+            }
+            replacedFiles.insert(iterator->first);
+            iterator = state.unitIncludes.erase(iterator);
+        }
+    }
+
+    static const std::set<std::wstring> sourceExtensions = {L".c", L".cc", L".cpp", L".cxx", L".c++", L".m", L".mm"};
+    for (const std::wstring &file : files) {
+        if (versions.absentFiles.count(file) > 0) {
+            state.unitIncludes.erase(file);
+            continue;
+        }
+        auto unit = unitByFile.find(file);
+        if (unit != unitByFile.end()) {
+            chooseUnit(*unit->second);
+            continue;
+        }
+        std::wstring extension = std::filesystem::path(file).extension().wstring();
+        std::transform(extension.begin(), extension.end(), extension.begin(), ::towlower);
+        if (sourceExtensions.count(extension) > 0) {
+            // Исходник той версии, которого нет в compile_commands.json (после неё удалён): флаги - единицы из той же папки
+            if (versions.contents.count(file) == 0 || allUnits.empty())
+                continue;
+            const Unit *neighbour = &allUnits[0];
+            for (const Unit &candidate : allUnits) {
+                if (std::filesystem::path(candidate.relativeFile).parent_path() == std::filesystem::path(file).parent_path()) {
+                    neighbour = &candidate;
+                    break;
+                }
+            }
+            Unit sourceUnit = *neighbour;
+            sourceUnit.file = (root / file).lexically_normal().string();
+            sourceUnit.relativeFile = file;
+            chooseUnit(sourceUnit);
+            continue;
+        }
+
+        // Заголовок: через свою .cpp (там определения его объявлений - у них комментарии из заголовка), нет её - через любую подключающую его единицу
+        auto isIncludedIn = [&](const std::wstring &unitFile) {
+            auto found = state.unitIncludes.find(unitFile);
+            return found != state.unitIncludes.end() && std::binary_search(found->second.begin(), found->second.end(), file);
+        };
+        const Unit *chosen = nullptr;
+        std::wstring stem = std::filesystem::path(file).replace_extension().generic_wstring();
+        for (const std::wstring &sourceExtension : sourceExtensions) {
+            auto paired = unitByFile.find(stem + sourceExtension);
+            if (paired != unitByFile.end() && isIncludedIn(paired->first))
+                chosen = paired->second;
+        }
+        for (auto iterator = state.unitIncludes.begin(); chosen == nullptr && iterator != state.unitIncludes.end(); ++iterator) {
+            if (unitByFile.count(iterator->first) > 0 && isIncludedIn(iterator->first))
+                chosen = unitByFile[iterator->first];
+        }
+        if (chosen != nullptr)
+            chooseUnit(*chosen);
+    }
+
+    // Время правки - до разбора: файл, поправленный во время разбора, при следующей проверке окажется правленым
+    std::map<std::wstring, int64_t> timesBefore;
+    if (isDisk) {
+        for (const std::wstring &file : replacedFiles)
+            timesBefore[file] = fileWriteTime(root / file);
+    }
+
+    ShaderCatalog shaders = collectShaders(project, versions);
+    std::vector<WorkerResult> results;
+    if (!units.empty() && !parseUnits(*this, project, units, shaders, versions, results)) {
         error = L"Сканирование остановлено";
         return false;
     }
 
-    // Узлы, потом связи между узлами проекта
+    // Файлы, подключённые разобранными единицами, которых при прошлом разборе не было (новый заголовок, заголовок той версии), - тоже заменяются
+    std::set<std::wstring> newIncludes;
+    for (const WorkerResult &result : results) {
+        for (const auto &[unitFile, includes] : result.unitIncludes) {
+            for (const std::wstring &include : includes) {
+                if (state.fileTimes.count(include) == 0 && state.files.count(include) == 0)
+                    newIncludes.insert(include);
+            }
+        }
+    }
+    replacedFiles.insert(newIncludes.begin(), newIncludes.end());
+    distributeResults(results, &replacedFiles, state);
+
+    // На диске - новое время правки заменённых файлов и новых подключённых; удалённые с диска из слежения уходят
+    if (isDisk) {
+        for (const std::wstring &file : replacedFiles) {
+            auto before = timesBefore.find(file);
+            int64_t time = before != timesBefore.end() ? before->second : fileWriteTime(root / file);
+            if (time == 0)
+                state.fileTimes.erase(file);
+            else
+                state.fileTimes[file] = time;
+        }
+        state.compileCommandsPath = compileCommandsPath.wstring();
+        state.compileCommandsTime = fileWriteTime(compileCommandsPath);
+    }
+    Debug() << "Пересканирование:" << files.size() << "файлов," << units.size() << "единиц, заменено файлов" << replacedFiles.size()
+            << (isDisk ? "" : "(другая версия)");
+    return true;
+}
+
+
+// Граф из разобранного: узлы, связи, компоненты, шейдеры (шейдеры - той же версии проекта)
+void Analyzer::buildGraph(const ProjectTemplate &project, const ScanState &state, const FileVersions &versions, Graph &graph) {
     graph.clear();
     std::set<std::string> componentTypeIds;
-    for (WorkerResult &result : results) {
-        for (GraphNode &node : result.nodes)
+    for (const auto &[file, fileScan] : state.files) {
+        for (const GraphNode &node : fileScan.nodes)
             graph.addNode(node);
-        componentTypeIds.insert(result.componentTypeIds.begin(), result.componentTypeIds.end());
+        for (const PendingComponent &component : fileScan.components)
+            componentTypeIds.insert(component.typeId);
     }
 
     // Компоненты и события по шаблону проекта
@@ -1124,16 +1399,16 @@ bool Analyzer::scan(const ProjectTemplate &project, Graph &graph, std::wstring &
             node.kind = NodeKind::Event;
     }
 
-    for (WorkerResult &result : results) {
+    for (const auto &[file, fileScan] : state.files) {
         // Порядок - среди вызовов функций проекта с определением: вызовы без узла (неявные конструкторы и т.п.) номер не занимают
         std::map<int, int> resolvedCallsCount;
-        for (const PendingCall &call : result.calls) {
+        for (const PendingCall &call : fileScan.calls) {
             int from = graph.findNode(call.callerId);
             int to = graph.findNode(call.calleeId);
             if (from >= 0 && to >= 0 && from != to)
                 graph.addEdge(from, to, EdgeKind::Call, ++resolvedCallsCount[from]);
         }
-        for (const PendingAccess &access : result.accesses) {
+        for (const PendingAccess &access : fileScan.accesses) {
             int function = graph.findNode(access.functionId);
             int type = graph.findNode(access.typeId);
             if (function < 0 || type < 0 || graph.nodes[type].kind == NodeKind::Function)
@@ -1144,7 +1419,117 @@ bool Analyzer::scan(const ProjectTemplate &project, Graph &graph, std::wstring &
                 graph.addEdge(type, function, EdgeKind::Read, 0);
         }
     }
-    addShaders(shaders, results, graph);
-    Debug() << "Граф:" << graph.nodes.size() << "узлов," << graph.edges.size() << "связей, единиц с ошибками разбора:" << int(unitsWithErrors);
+    addShaders(collectShaders(project, versions), state, graph);
+}
+
+
+// Файлы проекта, поменявшиеся на диске после разбора (по времени правки, удалённые тоже); true - что-то поменялось, в том числе compile_commands.json
+bool Analyzer::findChangedFiles(const ScanState &state, const std::wstring &projectRoot, std::set<std::wstring> &files) {
+    std::filesystem::path root(projectRoot);
+    for (const auto &[file, time] : state.fileTimes) {
+        if (fileWriteTime(root / file) != time)
+            files.insert(file);
+    }
+    bool isCompileCommandsChanged = !state.compileCommandsPath.empty() && fileWriteTime(state.compileCommandsPath) != state.compileCommandsTime;
+    return !files.empty() || isCompileCommandsChanged;
+}
+
+
+// Запись разобранного (папка данных проекта у CodeAtlas)
+bool ScanState::save(const std::wstring &path) const {
+    std::error_code errorCode;
+    std::filesystem::create_directories(std::filesystem::path(path).parent_path(), errorCode);
+    std::ofstream file(std::filesystem::path(path), std::ios::binary);
+    if (!file)
+        return false;
+
+    // Строки: C - compile_commands.json и его время; F - файл, за ним его узлы (N, как в графе), вызовы (L), доступы (A), компоненты (K),
+    // шейдеры (S: имена и define через \x1f), переменные (V); U - единица и подключённые файлы; T - файл под слежением и время правки
+    constexpr char listSeparator = '\x1f';
+    auto joined = [&](const auto &values) {
+        std::string text;
+        for (const std::string &value : values)
+            text += (text.empty() ? "" : std::string(1, listSeparator)) + value;
+        return escapeField(text);
+    };
+    file << "codeatlas-scan\t1\n";
+    file << "C\t" << escapeField(wstringToString(compileCommandsPath)) << '\t' << compileCommandsTime << '\n';
+    for (const auto &[fileName, fileScan] : files) {
+        file << "F\t" << escapeField(wstringToString(fileName)) << '\n';
+        for (const GraphNode &node : fileScan.nodes)
+            Graph::writeNode(file, node);
+        for (const PendingCall &call : fileScan.calls)
+            file << "L\t" << escapeField(call.callerId) << '\t' << escapeField(call.calleeId) << '\t' << call.order << '\n';
+        for (const PendingAccess &access : fileScan.accesses)
+            file << "A\t" << escapeField(access.functionId) << '\t' << escapeField(access.typeId) << '\t' << (access.isWrite ? 1 : 0) << '\n';
+        for (const PendingComponent &component : fileScan.components)
+            file << "K\t" << escapeField(component.functionId) << '\t' << escapeField(component.typeId) << '\n';
+        for (const PendingShaderUse &use : fileScan.shaderUses)
+            file << "S\t" << escapeField(use.functionId) << '\t' << escapeField(use.programId) << '\t' << joined(use.shaderNames) << '\t'
+                 << joined(use.defines) << '\n';
+        for (const PendingVariableUse &use : fileScan.variableUses)
+            file << "V\t" << escapeField(use.functionId) << '\t' << escapeField(use.variableId) << '\n';
+    }
+    for (const auto &[unitFile, includes] : unitIncludes) {
+        file << "U\t" << escapeField(wstringToString(unitFile));
+        for (const std::wstring &include : includes)
+            file << '\t' << escapeField(wstringToString(include));
+        file << '\n';
+    }
+    for (const auto &[fileName, time] : fileTimes)
+        file << "T\t" << escapeField(wstringToString(fileName)) << '\t' << time << '\n';
+    return bool(file);
+}
+
+// Загрузка разобранного
+bool ScanState::load(const std::wstring &path) {
+    *this = ScanState();
+    std::ifstream file(std::filesystem::path(path), std::ios::binary);
+    if (!file)
+        return false;
+    std::string line;
+    std::getline(file, line);
+    if (line.rfind("codeatlas-scan", 0) != 0)
+        return false;
+
+    constexpr char listSeparator = '\x1f';
+    auto split = [&](const std::string &text) {
+        std::vector<std::string> values;
+        std::stringstream stream(text);
+        std::string value;
+        while (std::getline(stream, value, listSeparator))
+            values.push_back(value);
+        return values;
+    };
+    FileScan *fileScan = nullptr;
+    while (std::getline(file, line)) {
+        std::vector<std::string> fields = splitFields(line);
+        const std::string &kind = fields[0];
+        if (kind == "C" && fields.size() >= 3) {
+            compileCommandsPath = stringToWString(fields[1]);
+            compileCommandsTime = std::atoll(fields[2].c_str());
+        } else if (kind == "F" && fields.size() >= 2) {
+            fileScan = &files[stringToWString(fields[1])];
+        } else if (kind == "N" && fields.size() >= 10 && fileScan != nullptr) {
+            fileScan->nodes.push_back(Graph::readNode(fields));
+        } else if (kind == "L" && fields.size() >= 4 && fileScan != nullptr) {
+            fileScan->calls.push_back(PendingCall{fields[1], fields[2], std::atoi(fields[3].c_str())});
+        } else if (kind == "A" && fields.size() >= 4 && fileScan != nullptr) {
+            fileScan->accesses.push_back(PendingAccess{fields[1], fields[2], fields[3] == "1"});
+        } else if (kind == "K" && fields.size() >= 3 && fileScan != nullptr) {
+            fileScan->components.push_back(PendingComponent{fields[1], fields[2]});
+        } else if (kind == "S" && fields.size() >= 5 && fileScan != nullptr) {
+            std::vector<std::string> defines = split(fields[4]);
+            fileScan->shaderUses.push_back(PendingShaderUse{fields[1], split(fields[3]), std::set<std::string>(defines.begin(), defines.end()), fields[2]});
+        } else if (kind == "V" && fields.size() >= 3 && fileScan != nullptr) {
+            fileScan->variableUses.push_back(PendingVariableUse{fields[1], fields[2]});
+        } else if (kind == "U" && fields.size() >= 2) {
+            std::vector<std::wstring> &includes = unitIncludes[stringToWString(fields[1])];
+            for (size_t i = 2; i < fields.size(); ++i)
+                includes.push_back(stringToWString(fields[i]));
+        } else if (kind == "T" && fields.size() >= 3) {
+            fileTimes[stringToWString(fields[1])] = std::atoll(fields[2].c_str());
+        }
+    }
     return true;
 }

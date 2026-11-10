@@ -13,19 +13,22 @@
 #include "Canvas/CanvasRenderer.h"
 #include "Graph/Graph.h"
 #include "Layout/Layout.h"
-#include "History/History.h"
 
 
 // Карта кода на холсте: области папок, рамки файлов, блоки функций и типов, связи выбранного блока, пометки.
 // Собирает слои рисования из графа и раскладки, когда что-то сменилось, и ведёт ввод холста: камера, выбор, перетаскивание
 class MapView {
 public:
-    // Что показывать: граф (текущий или снимок истории), снимок для сравнения - его пропавшие узлы рисуются призраками
+    // Что показывать: граф проекта, граф коммита для сравнения - его пропавшие узлы рисуются серыми призраками
     const Graph *graph = nullptr;
     const Graph *previousGraph = nullptr;
-    std::vector<DiffState> diffStates;  // Состояние узлов graph относительно previousGraph
-    std::vector<int> removedNodes;      // Узлы previousGraph, которых нет в graph
+    std::vector<DiffState> diffStates;    // Состояние узлов graph относительно previousGraph
+    std::vector<int> removedNodes;        // Узлы previousGraph, которых нет в graph
+    std::vector<LayoutRect> ghostRects;   // Места их призраков на холсте (размер 0 - не рисуется)
     bool isDiffShown = false;
+    std::vector<char> uncommittedNodes;   // Узел graph правлен после последнего коммита (точка в углу блока)
+    std::vector<char> uncommittedGhosts;  // Призрак из removedNodes удалён после последнего коммита
+    bool isUncommittedShown = false;
     Layout *layout = nullptr;
 
     // Фильтры связей: вызовы, чтение и запись данных, все связи без выбора
@@ -98,6 +101,8 @@ public:
     void setViewInsets(glm::dvec4 insets) {viewInsets = insets;}
     // Камера ещё едет к цели (окну нужны кадры)
     bool isAnimating() const {return isCameraMoving;}
+    // Тащат блок, файл, папку или пометку (граф менять нельзя до отпускания)
+    bool isDragging() const {return dragKind != DragKind::None && dragKind != DragKind::Pan;}
 
     // Экранная точка в точку холста
     glm::dvec2 screenToWorld(glm::dvec2 screen) const {return (screen - glm::dvec2(viewport) * 0.5) / zoom + cameraCenter;}

@@ -8,6 +8,9 @@
 #include <functional>
 #include <cwctype>
 #include <filesystem>
+#include <chrono>
+#include <ctime>
+#include <cstdlib>
 #include <GL/glew.h>
 #include <SDL.h>
 #include <VisorGUI/vgui.h>
@@ -16,15 +19,16 @@
 #include "Graph/Graph.h"
 #include "Project/ProjectTemplate.h"
 #include "Layout/Layout.h"
-#include "History/History.h"
+#include "Git/Git.h"
 #include "Canvas/MapView.h"
 #include "Settings/Settings.h"
 #include "Ide/IdeLauncher.h"
 #include "Global/Logging_Fmt.h"
 
 
-// Окно программы: холст карты, сверху - проект, сканирование, поиск и фильтры, справа - описание выбранного, снизу - история снимков.
-// Сканирование идёт в своём потоке, окно в это время живое
+// Окно программы: холст карты, сверху - проект, сканирование, поиск и фильтры, справа - описание выбранного, снизу - git: pull, коммит,
+// push и сравнение с коммитом. Долгая работа (сканирование, пересканирование правленых файлов, граф коммита, команды git) идёт по одной
+// в своём потоке, окно в это время живое; правленые на диске файлы карта подхватывает сама
 class App {
 public:
     // Запуск окна с проектом (пусто - последний открытый)
@@ -37,28 +41,74 @@ private:
     glm::ivec2 windowSize{1600, 900};
     bool isRunning = true;
 
-    // Проект: шаблон, раскладка, история, граф на карте и снимок перед ним для сравнения
+    // Проект: шаблон, раскладка, разобранное по файлам (загружено ли с диска), граф на карте
     ProjectTemplate project;
     Layout layout;
-    History history;
+    ScanState scanState;
+    bool isScanStateLoaded = false;
     Graph shownGraph;
-    Graph previousGraph;
-    int shownSnapshot = -1;
     MapView mapView;
 
-    // Сканирование в потоке
+    // Git: папка .git (пусто - не git), HEAD и прошлый коммит, с чем сравнивать, графы коммитов (проект на коммите) по хэшу
+    std::wstring gitDir;
+    std::string headCommit;
+    std::string previousCommit;
+    int64_t headLogTime = 0;                   // Время правки журнала HEAD (.git/logs/HEAD): сменилось - HEAD сдвинулся
+    std::string compareTarget = "previous";    // С чем сравнивать: previous - прошлый коммит (следует за HEAD), иначе хэш
+    std::string beforePullCommit;              // HEAD до последнего pull, который принёс коммиты
+    std::string compareCommit;                 // Хэш, с которым сравнивается карта сейчас (пусто - не с чем)
+    std::map<std::string, Graph> commitGraphs;
+    std::set<std::string> failedCommits;       // Графы этих коммитов не собрались - не повторять
+    double lastChangeCheckTime = 0;            // Когда последний раз смотрели правки на диске и HEAD, секунды
+    std::set<std::wstring> changedFiles;       // Правленые на диске файлы, ждущие пересканирования
+    bool isRefreshRequested = false;
+
+    // Проверка времени правки файлов - в своём потоке (сотни файлов под Windows - заметная доля кадра)
+    std::thread changeCheckThread;
+    std::atomic<bool> isChangeCheckFinished = false;
+    bool isChangeChecking = false;
+    bool isChangeCheckFound = false;
+    ScanState changeCheckState;                // Копия времени правки файлов для потока проверки
+    std::set<std::wstring> changeCheckFiles;
+
+    // Фоновая работа - одна за раз в своём потоке
+    enum class JobKind {
+        None,
+        Scan,         // Сканирование всего проекта
+        LoadState,    // Загрузка разобранного с диска
+        Refresh,      // Пересканирование правленых файлов
+        CommitGraph,  // Граф проекта на коммите
+        GitCommand    // pull, коммит, push
+    };
+    enum class GitCommand {
+        None,
+        Pull,
+        Commit,
+        Push
+    };
     Analyzer analyzer;
-    std::thread scanThread;
-    std::atomic<bool> isScanFinished = false;
-    bool isScanning = false;
-    bool isScanSucceeded = false;
-    ProjectTemplate scanProject;
-    Graph scanGraph;
-    std::wstring scanError;
+    ProjectTemplate jobProject;                // Шаблон проекта для потока (окно своё может менять)
+    std::thread jobThread;
+    std::atomic<bool> isJobFinished = false;
+    JobKind jobKind = JobKind::None;
+    bool isJobSucceeded = false;
+    std::wstring jobError;
+    ScanState jobState;                        // Разобранное задачи (у графа коммита - копия с версией коммита)
+    Graph jobGraph;                            // Граф по итогам задачи
+    std::set<std::wstring> jobFiles;           // Файлы пересканирования
+    std::string jobCommit;                     // Коммит графа коммита
+    GitCommand jobGitCommand = GitCommand::None;
+    std::string jobGitOutput;
+    std::string jobHeadBefore;                 // HEAD до pull
+    std::chrono::steady_clock::time_point jobStartTime;
+    bool isScanRequested = false;
+    GitCommand requestedGitCommand = GitCommand::None;
 
     // Окна интерфейса
     vgui::ScrollAreaWidget *topBar = nullptr;
-    vgui::LineEdit *projectEdit = nullptr;
+    vgui::ComboBox *recentCombo = nullptr;
+    std::vector<std::wstring> recentProjects;  // Ранее открытые проекты, последний первым
+    std::wstring pendingProject;               // Открыть проект из списка (после событий: список при открытии пересобирается)
     vgui::Label *statusLabel = nullptr;
     vgui::ProgressBar *scanProgress = nullptr;
     vgui::Button *scanButton = nullptr;
@@ -67,10 +117,14 @@ private:
     vgui::CheckBox *dataCheck = nullptr;
     vgui::CheckBox *allEdgesCheck = nullptr;
     vgui::ScrollAreaWidget *detailsPanel = nullptr;
-    vgui::ScrollAreaWidget *historyBar = nullptr;
-    vgui::Slider *historySlider = nullptr;
-    vgui::Label *historyLabel = nullptr;
+    vgui::ScrollAreaWidget *gitBar = nullptr;
+    vgui::LineEdit *commitEdit = nullptr;
+    vgui::Button *commitButton = nullptr;
+    vgui::Button *compareButton = nullptr;
     vgui::CheckBox *diffCheck = nullptr;
+    vgui::ScrollAreaWidget *commitListWindow = nullptr;
+    std::string pendingCompareTarget;          // Выбранное в списке коммитов (после событий: список пересобирается)
+    vgui::ScrollAreaWidget *gitOutputWindow = nullptr;
     vgui::ScrollAreaWidget *settingsWindow = nullptr;
     std::vector<std::function<void()>> settingsRowUpdaters; // Ползунки и подписи окна настроек - под текущие значения (после сброса)
     bool isSettingsChanged = false;                          // Настройки менялись: сохранить при закрытии окна и при выходе
@@ -79,7 +133,6 @@ private:
 
     bool isDetailsDirty = true;      // Пересобрать окно описания (после событий: кнопки в нём удаляются)
     std::string pendingSelectId;     // Выбрать узел по щелчку в окне описания (после событий)
-    int pendingSnapshot = -1;        // Показать снимок по ползунку истории (после событий)
     std::vector<int> searchResults;  // Узлы под поиском по порядку
     int searchCursor = -1;           // Последний показанный из них
 
@@ -99,10 +152,12 @@ private:
     // Размеры окон интерфейса под окно программы
     void updateGuiGeometry();
 
-    // Открыть проект: шаблон, раскладка, история; показать последний снимок
+    // Открыть проект: шаблон, раскладка, граф, git
     void openProject(const std::wstring &root);
-    // Показать снимок истории (граф, сравнение с предыдущим, места новых узлов)
-    void showSnapshot(int snapshotIndex);
+    // Граф на карте сменился: места новых узлов, раздвигание наложений, выбор (по id), поиск, сравнение
+    void showGraph(const std::string &selectedId);
+    // Сравнение карты с выбранным коммитом и с HEAD (правки после последнего коммита); графа коммита нет - он заказывается
+    void updateComparison();
     // Сохранить раскладку с видом камеры
     void saveLayout();
     // Разложить карту заново (с отменой по Ctrl+Z)
@@ -110,9 +165,26 @@ private:
     // Открыть файл проекта (путь от корня) в IDE на строке
     void openInIde(const std::wstring &file, int line);
 
-    // Сканирование в потоке и его ход
+    // Сканирование всего проекта (идёт - остановить)
     void startScan();
-    void pollScan();
+    // Следующая фоновая работа, если поток свободен: команда git, сканирование, загрузка разобранного, пересканирование правок, графы коммитов
+    void startNextJob();
+    // Ход фоновой работы и её итог
+    void pollJob();
+    // Правки на диске и сдвиг HEAD (раз в пару секунд, когда поток свободен)
+    void checkChanges();
+    // Дождаться проверки правок, если идёт (перед сменой проекта и выходом)
+    void waitChangeCheck();
+    // Команда git из полосы снизу
+    void requestGitCommand(GitCommand command);
+    // Окно вывода git (ошибка pull, коммита, push) с кнопкой терминала
+    void showGitOutput(const std::wstring &title, const std::string &output);
+    // Список коммитов для сравнения над полосой снизу
+    void openCommitList();
+    // Запомнить выбор сравнения и HEAD до pull (папка данных проекта)
+    void saveGitChoice();
+    // Список ранее открытых проектов: в файл и в список сверху
+    void updateRecentProjects(const std::wstring &openedRoot);
 
     // Поиск по имени: подсветка подходящих, Enter - к следующему
     void updateSearch(const std::wstring &text);
@@ -131,7 +203,7 @@ private:
 
     // Папка ресурсов программы (шрифт)
     static std::filesystem::path resourceDir();
-    // Файл последнего открытого проекта
+    // Файл ранее открытых проектов (последний первым)
     static std::filesystem::path recentProjectFile();
 };
 

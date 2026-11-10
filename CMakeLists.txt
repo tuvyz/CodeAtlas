@@ -11,7 +11,7 @@ file(GLOB_RECURSE CODEATLAS_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_SOURCE_DIR}/Graph/*.cpp"
     "${CMAKE_SOURCE_DIR}/Project/*.cpp"
     "${CMAKE_SOURCE_DIR}/Layout/*.cpp"
-    "${CMAKE_SOURCE_DIR}/History/*.cpp"
+    "${CMAKE_SOURCE_DIR}/Git/*.cpp"
     "${CMAKE_SOURCE_DIR}/Canvas/*.cpp"
     "${CMAKE_SOURCE_DIR}/App/*.cpp"
     "${CMAKE_SOURCE_DIR}/Settings/*.cpp"

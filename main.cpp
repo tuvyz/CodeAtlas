@@ -2,6 +2,7 @@
 
 
 // Сканирование без окна: CodeAtlas --scan <корень проекта> [--out <файл графа>]; граф по умолчанию - graph.txt в папке данных проекта
+// (там же разобранное по файлам - scan.txt: по нему окно пересканирует правленые файлы)
 static int runScanCommand(const std::string &root, const std::string &outPath) {
     std::error_code errorCode;
     if (!std::filesystem::is_directory(std::filesystem::u8path(root), errorCode)) {
@@ -13,12 +14,14 @@ static int runScanCommand(const std::string &root, const std::string &outPath) {
         Debug() << "Нет codeatlas.yaml в" << root << "- значения по умолчанию";
 
     Analyzer analyzer;
-    Graph graph;
+    ScanState state;
     std::wstring error;
-    if (!analyzer.scan(project, graph, error)) {
+    if (!analyzer.scan(project, state, error)) {
         Debug() << "Сканирование не вышло:" << wstringToString(error);
         return 1;
     }
+    Graph graph;
+    Analyzer::buildGraph(project, state, FileVersions(), graph);
 
     // Сводка по видам узлов и связей
     int kindCounts[4] = {};
@@ -30,6 +33,8 @@ static int runScanCommand(const std::string &root, const std::string &outPath) {
     Debug() << "Функций" << kindCounts[0] << ", типов" << kindCounts[1] << ", компонентов" << kindCounts[2] << ", событий" << kindCounts[3];
     Debug() << "Вызовов" << edgeCounts[0] << ", чтений" << edgeCounts[1] << ", записей" << edgeCounts[2];
 
+    if (outPath.empty() && !state.save(project.dataDir + L"/scan.txt"))
+        Debug() << "Не записано разобранное" << wstringToString(project.dataDir);
     std::wstring path = outPath.empty() ? project.dataDir + L"/graph.txt" : stringToWString(outPath);
     if (!graph.save(path)) {
         Debug() << "Не записан граф" << wstringToString(path);

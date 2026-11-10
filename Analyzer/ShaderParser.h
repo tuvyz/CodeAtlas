@@ -52,6 +52,9 @@ public:
     // Разбор файла; false - не прочитан
     static bool parse(const std::filesystem::path &path, ShaderFile &file);
 
+    // Разбор текста шейдера (файл другой версии проекта)
+    static void parseText(const std::string &text, ShaderFile &file);
+
     // Функция в этих ветках собирается при заданных define
     static bool isCompiled(const std::vector<ShaderBranch> &branches, const std::set<std::string> &defines);
 };

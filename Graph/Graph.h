@@ -6,6 +6,7 @@
 #include <map>
 #include <set>
 #include <cstdint>
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
 #include <filesystem>
@@ -28,6 +29,14 @@ enum class EdgeKind : uint8_t {
     Write   // Запись данных: от пишущей функции к типу
 };
 
+
+// Состояние узла при сравнении двух версий графа
+enum class DiffState : uint8_t {
+    Same,
+    Added,
+    Changed,
+    Removed
+};
 
 // Узел карты: функция или тип данных
 struct GraphNode {
@@ -75,6 +84,13 @@ public:
     bool save(const std::wstring &path) const;
     // Загрузка из текстового файла (связи на узлы, которых нет, пропускаются)
     bool load(const std::wstring &path);
+
+    // Строка узла в текстовом файле (N и поля через табуляцию) и узел из полей такой строки (полей не меньше 10)
+    static void writeNode(std::ostream &stream, const GraphNode &node);
+    static GraphNode readNode(const std::vector<std::string> &fields);
+
+    // Сравнение: состояние узлов current относительно previous и узлы previous, которых нет в current
+    static void compare(const Graph &previous, const Graph &current, std::vector<DiffState> &currentStates, std::vector<int> &removedPreviousNodes);
 
 private:
     std::map<std::string, int> nodeIndexById;
