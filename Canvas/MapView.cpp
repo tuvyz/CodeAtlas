@@ -102,7 +102,7 @@ void MapView::rebuildGeometry() {
 
     // Призраки удалённых узлов - внутри рамки своего файла (файл ещё есть)
     std::map<std::wstring, std::vector<LayoutRect>> ghostsOfFile;
-    if (isDiffShown && previousGraph != nullptr) {
+    if (isDiffShown && !isDeadCodeShown && previousGraph != nullptr) {
         for (size_t ghostIndex = 0; ghostIndex < removedNodes.size() && ghostIndex < ghostRects.size(); ++ghostIndex) {
             if (ghostRects[ghostIndex].size.x > 0)
                 ghostsOfFile[previousGraph->nodes[removedNodes[ghostIndex]].file].push_back(ghostRects[ghostIndex]);
@@ -284,11 +284,19 @@ void MapView::buildScene() {
     }
     bool isFading = selectedNode >= 0;
 
-    // Сравнение с коммитом: изменённое ярко, остальное бледно, рамки файлов и области папок с изменениями обведены цветом изменения
-    // (толщина рамки - в пикселях экрана: видно и со всей карты). Изменение файла: 1 - только новое, 2 - есть изменённое или удалённое
+    // Выделенное на всей карте - мёртвый код (по галке) или изменения с коммита: оно ярко, остальное бледно, рамки файлов и области папок
+    // с выделенным обведены его цветом (толщина рамки - в пикселях экрана: видно и со всей карты). Отметка файла: 1 - только новое,
+    // 2 - есть изменённое или удалённое, 3 - мёртвый код
     std::vector<char> isNodeChanged(graph->nodes.size(), 0);
     std::map<std::wstring, int> fileChanges;
-    if (isDiffShown) {
+    if (isDeadCodeShown) {
+        for (int nodeIndex = 0; nodeIndex < int(graph->nodes.size()) && nodeIndex < int(deadNodes.size()); ++nodeIndex) {
+            if (!deadNodes[nodeIndex])
+                continue;
+            isNodeChanged[nodeIndex] = 1;
+            fileChanges[graph->nodes[nodeIndex].file] = 3;
+        }
+    } else if (isDiffShown) {
         for (int nodeIndex = 0; nodeIndex < int(graph->nodes.size()); ++nodeIndex) {
             DiffState state = nodeIndex < int(diffStates.size()) ? diffStates[nodeIndex] : DiffState::Same;
             bool isUncommitted = isUncommittedShown && nodeIndex < int(uncommittedNodes.size()) && uncommittedNodes[nodeIndex];
@@ -304,7 +312,7 @@ void MapView::buildScene() {
         }
     }
     bool isChangeFocus = !fileChanges.empty();
-    auto changeColor = [](int change) {return change == 1 ? hexColor(0x3F9B57) : hexColor(0xD79E22);};
+    auto changeColor = [](int change) {return change == 1 ? hexColor(0x3F9B57) : change == 2 ? hexColor(0xD79E22) : hexColor(0xC0504D);};
     constexpr float changeBorderWidth = 2.5f; // Рамка файла или папки с изменениями, пиксели экрана
 
     // Области папок: заливка цветом папки верхнего уровня, сверху полоса имени во всю ширину тоном темнее. Имена папок и файлов -
@@ -425,6 +433,10 @@ void MapView::buildScene() {
                 border = hexColor(0xD79E22);
             }
         }
+        if (isDeadCodeShown && isNodeChanged[nodeIndex]) {
+            fill = hexColor(0xFBE4E2);
+            border = hexColor(0xC0504D);
+        }
         float borderWidth = isNodeChanged[nodeIndex] ? 2.0f : 1.0f;
 
         // Неизменённое при сравнении - бледное
@@ -487,8 +499,8 @@ void MapView::buildScene() {
         }
     }
 
-    // Призраки удалённых узлов: серые полупрозрачные, пунктиром
-    if (isDiffShown && previousGraph != nullptr) {
+    // Призраки удалённых узлов: серые полупрозрачные, пунктиром (при мёртвом коде не нужны)
+    if (isDiffShown && !isDeadCodeShown && previousGraph != nullptr) {
         for (int ghostIndex = 0; ghostIndex < int(removedNodes.size()) && ghostIndex < int(ghostRects.size()); ++ghostIndex) {
             const GraphNode &node = previousGraph->nodes[removedNodes[ghostIndex]];
             const LayoutRect &rect = ghostRects[ghostIndex];

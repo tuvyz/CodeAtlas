@@ -61,10 +61,17 @@ struct PendingVariableUse {
     std::string variableId;
 };
 
+// Функция проекта по имени не в вызове (адрес, обработчик) в теле функции: её зовут не напрямую
+struct PendingReference {
+    std::string functionId;
+    std::string referencedId;
+};
+
 // Разобранное в одном файле проекта: определения и что делают функции из них (связи ставятся при сборке графа)
 struct FileScan {
     std::vector<GraphNode> nodes;
     std::vector<PendingCall> calls;
+    std::vector<PendingReference> references;
     std::vector<PendingAccess> accesses;
     std::vector<PendingComponent> components;
     std::vector<PendingShaderUse> shaderUses;

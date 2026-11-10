@@ -80,12 +80,13 @@ bool Graph::load(const std::wstring &path) {
 }
 
 
-// Строка узла в текстовом файле: N, id, вид, имя, полное имя, сигнатура, файл, строка, хэш тела, комментарий, строк в определении
+// Строка узла в текстовом файле: N, id, вид, имя, полное имя, сигнатура, файл, строка, хэш тела, комментарий, строк в определении,
+// зовут ли не напрямую
 void Graph::writeNode(std::ostream &stream, const GraphNode &node) {
     stream << "N\t" << escapeField(node.id) << '\t' << int(node.kind) << '\t' << escapeField(wstringToString(node.name)) << '\t'
            << escapeField(wstringToString(node.qualifiedName)) << '\t' << escapeField(wstringToString(node.signature)) << '\t'
            << escapeField(wstringToString(node.file)) << '\t' << node.line << '\t' << node.bodyHash << '\t'
-           << escapeField(wstringToString(node.comment)) << '\t' << node.lineCount << '\n';
+           << escapeField(wstringToString(node.comment)) << '\t' << node.lineCount << '\t' << (node.isIndirect ? 1 : 0) << '\n';
 }
 
 // Узел из полей строки узла (полей не меньше 10)
@@ -101,6 +102,7 @@ GraphNode Graph::readNode(const std::vector<std::string> &fields) {
     node.bodyHash = std::strtoull(fields[8].c_str(), nullptr, 10);
     node.comment = stringToWString(fields[9]);
     node.lineCount = fields.size() >= 11 ? std::atoi(fields[10].c_str()) : 0;
+    node.isIndirect = fields.size() >= 12 && fields[11] == "1";
     return node;
 }
 

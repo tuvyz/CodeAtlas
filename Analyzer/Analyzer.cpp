@@ -38,6 +38,7 @@ struct Unit {
 struct WorkerResult {
     std::vector<GraphNode> nodes;
     std::vector<PendingCall> calls;
+    std::vector<PendingReference> references;
     std::vector<PendingAccess> accesses;
     std::vector<PendingComponent> components;
     std::vector<PendingShaderUse> shaderUses;
@@ -71,6 +72,7 @@ struct FunctionVisit {
     std::string ownerTypeId;         // Класс метода: чтение своих полей связью не считается
     int callsCount = 0;              // Счётчик порядка вызовов
     std::set<std::string> calledIds; // Уже учтённые вызываемые: порядок - по первому вызову
+    std::set<std::string> referencedIds; // Уже учтённые функции по имени не в вызове
     std::set<std::string> variableIds; // Поля и переменные с типом-структурой, к которым функция обращается
     std::set<unsigned> shaderLiterals;  // Строки с именами шейдеров, уже учтённые в сборке программы (хэши курсоров)
 };
@@ -383,6 +385,13 @@ private:
         node.comment = declarationComment(cursor);
         node.bodyHash = extentHash(cursor);
         node.lineCount = extentLineCount(cursor);
+
+        // Переопределение виртуальной зовут через базовый класс
+        CXCursor *overridden = nullptr;
+        unsigned overriddenCount = 0;
+        clang_getOverriddenCursors(cursor, &overridden, &overriddenCount);
+        node.isIndirect = overriddenCount > 0;
+        clang_disposeOverriddenCursors(overridden);
         result.nodes.push_back(node);
 
         FunctionVisit function;
@@ -602,6 +611,20 @@ private:
             if (parser->shared.shaders->fileByName.count(text) > 0 && function->shaderLiterals.count(clang_hashCursor(cursor)) == 0)
                 parser->result.shaderUses.push_back(PendingShaderUse{function->functionId, {text}, {}, std::string()});
             return CXChildVisit_Continue;
+        }
+
+        // Функция проекта по имени не в вызове (адрес, обработчик, аргумент шаблона): её зовут не напрямую - не мёртвый код
+        if (kind == CXCursor_DeclRefExpr || kind == CXCursor_MemberRefExpr) {
+            CXCursor referenced = clang_getCursorReferenced(cursor);
+            CXCursorKind referencedKind = clang_getCursorKind(referenced);
+            bool isFunction = referencedKind == CXCursor_FunctionDecl || referencedKind == CXCursor_CXXMethod ||
+                              referencedKind == CXCursor_FunctionTemplate || referencedKind == CXCursor_ConversionFunction;
+            if (isFunction) {
+                std::string referencedId = nodeId(referenced);
+                if (!referencedId.empty() && function->calledIds.count(referencedId) == 0 && parser->isInProject(referenced) &&
+                    function->referencedIds.insert(referencedId).second)
+                    parser->result.references.push_back(PendingReference{function->functionId, referencedId});
+            }
         }
 
         // Обращение к полю или переменной-структуре: вдруг это программа шейдера (связь - после всех единиц)
@@ -1088,6 +1111,10 @@ void distributeResults(std::vector<WorkerResult> &results, const std::set<std::w
             if (FileScan *fileScan = fileScanOf(access.functionId))
                 fileScan->accesses.push_back(access);
         }
+        for (PendingReference &reference : result.references) {
+            if (FileScan *fileScan = fileScanOf(reference.functionId))
+                fileScan->references.push_back(reference);
+        }
         for (PendingComponent &component : result.components) {
             if (FileScan *fileScan = fileScanOf(component.functionId))
                 fileScan->components.push_back(component);
@@ -1418,6 +1445,11 @@ void Analyzer::buildGraph(const ProjectTemplate &project, const ScanState &state
             else
                 graph.addEdge(type, function, EdgeKind::Read, 0);
         }
+        for (const PendingReference &reference : fileScan.references) {
+            int referenced = graph.findNode(reference.referencedId);
+            if (referenced >= 0)
+                graph.nodes[referenced].isIndirect = true;
+        }
     }
     addShaders(collectShaders(project, versions), state, graph);
 }
@@ -1444,7 +1476,8 @@ bool ScanState::save(const std::wstring &path) const {
         return false;
 
     // Строки: C - compile_commands.json и его время; F - файл, за ним его узлы (N, как в графе), вызовы (L), доступы (A), компоненты (K),
-    // шейдеры (S: имена и define через \x1f), переменные (V); U - единица и подключённые файлы; T - файл под слежением и время правки
+    // шейдеры (S: имена и define через \x1f), переменные (V), функции по имени не в вызове (R); U - единица и подключённые файлы;
+    // T - файл под слежением и время правки. Версия 2: с R и флагом косвенного вызова у узлов (старый разбор - сканировать заново)
     constexpr char listSeparator = '\x1f';
     auto joined = [&](const auto &values) {
         std::string text;
@@ -1452,7 +1485,7 @@ bool ScanState::save(const std::wstring &path) const {
             text += (text.empty() ? "" : std::string(1, listSeparator)) + value;
         return escapeField(text);
     };
-    file << "codeatlas-scan\t1\n";
+    file << "codeatlas-scan\t2\n";
     file << "C\t" << escapeField(wstringToString(compileCommandsPath)) << '\t' << compileCommandsTime << '\n';
     for (const auto &[fileName, fileScan] : files) {
         file << "F\t" << escapeField(wstringToString(fileName)) << '\n';
@@ -1462,6 +1495,8 @@ bool ScanState::save(const std::wstring &path) const {
             file << "L\t" << escapeField(call.callerId) << '\t' << escapeField(call.calleeId) << '\t' << call.order << '\n';
         for (const PendingAccess &access : fileScan.accesses)
             file << "A\t" << escapeField(access.functionId) << '\t' << escapeField(access.typeId) << '\t' << (access.isWrite ? 1 : 0) << '\n';
+        for (const PendingReference &reference : fileScan.references)
+            file << "R\t" << escapeField(reference.functionId) << '\t' << escapeField(reference.referencedId) << '\n';
         for (const PendingComponent &component : fileScan.components)
             file << "K\t" << escapeField(component.functionId) << '\t' << escapeField(component.typeId) << '\n';
         for (const PendingShaderUse &use : fileScan.shaderUses)
@@ -1489,7 +1524,7 @@ bool ScanState::load(const std::wstring &path) {
         return false;
     std::string line;
     std::getline(file, line);
-    if (line.rfind("codeatlas-scan", 0) != 0)
+    if (line.rfind("codeatlas-scan\t2", 0) != 0)
         return false;
 
     constexpr char listSeparator = '\x1f';
@@ -1516,6 +1551,8 @@ bool ScanState::load(const std::wstring &path) {
             fileScan->calls.push_back(PendingCall{fields[1], fields[2], std::atoi(fields[3].c_str())});
         } else if (kind == "A" && fields.size() >= 4 && fileScan != nullptr) {
             fileScan->accesses.push_back(PendingAccess{fields[1], fields[2], fields[3] == "1"});
+        } else if (kind == "R" && fields.size() >= 3 && fileScan != nullptr) {
+            fileScan->references.push_back(PendingReference{fields[1], fields[2]});
         } else if (kind == "K" && fields.size() >= 3 && fileScan != nullptr) {
             fileScan->components.push_back(PendingComponent{fields[1], fields[2]});
         } else if (kind == "S" && fields.size() >= 5 && fileScan != nullptr) {

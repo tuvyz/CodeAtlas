@@ -259,7 +259,7 @@ void App::createGui() {
     topBar->addChild(scanButton);
     scanButton->eventManager().subscribe<vgui::Button::Click_Event>(this, [this](const vgui::Button::Click_Event &) {startScan();});
 
-    statusLabel = new vgui::Label(vgui::MySize<double>(440, 30), glm::dvec2(790, 13), fixedSize, inParent);
+    statusLabel = new vgui::Label(vgui::MySize<double>(310, 30), glm::dvec2(790, 13), fixedSize, inParent);
     statusLabel->setFontSize(13);
     statusLabel->setTextColor(mutedColor);
     topBar->addChild(statusLabel);
@@ -268,12 +268,12 @@ void App::createGui() {
     scanProgress->setVisible(false);
     topBar->addChild(scanProgress);
 
-    auto *searchTitle = new vgui::Label(vgui::MySize<double>(70, 30), glm::dvec2(-710, 13), fixedSize, inParent, glm::dvec2(0, 0), L"Найти");
+    auto *searchTitle = new vgui::Label(vgui::MySize<double>(70, 30), glm::dvec2(-810, 13), fixedSize, inParent, glm::dvec2(0, 0), L"Найти");
     searchTitle->setFontSize(13);
     searchTitle->setTextColor(mutedColor);
     topBar->addChild(searchTitle);
 
-    searchEdit = new vgui::LineEdit(vgui::MySize<double>(240, 34), glm::dvec2(-640, 11), fixedSize, inParent);
+    searchEdit = new vgui::LineEdit(vgui::MySize<double>(205, 34), glm::dvec2(-745, 11), fixedSize, inParent);
     searchEdit->setToolTip(L"Имя функции или типа; Enter - к следующему найденному");
     topBar->addChild(searchEdit);
     searchEdit->eventManager().subscribe<vgui::LineEdit::TextChanged_Event>(this, [this](const vgui::LineEdit::TextChanged_Event &event) {
@@ -293,6 +293,16 @@ void App::createGui() {
     addFilter(callsCheck, -386, L"Вызовы", true, L"Связи вызовов: от вызывающей функции к вызываемой, с номером по порядку в теле", &mapView.isCallsShown);
     addFilter(dataCheck, -278, L"Данные", true, L"Чтение (синие) и запись (оранжевые) полей и компонентов", &mapView.isDataShown);
     addFilter(allEdgesCheck, -170, L"Все связи", false, L"Связи всех блоков, а не только выбранного", &mapView.isAllEdgesShown);
+
+    // Мёртвый код: функции, которые никто не вызывает и не берёт по имени (кроме main, конструкторов, деструкторов, операторов и переопределений)
+    deadCodeCheck = new vgui::CheckBox(vgui::MySize<double>(136, 30), glm::dvec2(-530, 13), fixedSize, inParent, glm::dvec2(0, 0), L"Мёртвый код");
+    deadCodeCheck->setState(false, false);
+    deadCodeCheck->setToolTip(L"Функции, которые никто не вызывает и не берёт по имени (main, конструкторы, деструкторы, операторы, begin и end, переопределения "
+                              L"виртуальных не в счёт); остальное бледнеет");
+    topBar->addChild(deadCodeCheck);
+    deadCodeCheck->eventManager().subscribe<vgui::SwitchButton::StateChange_Event>(this, [this](const vgui::SwitchButton::StateChange_Event &) {
+        updateDeadCode();
+    });
 
     // Настройки: открыть и закрыть окно
     auto *settingsButton = new vgui::Button(vgui::MySize<double>(36, 34), glm::dvec2(-50, 11), fixedSize, inParent);
@@ -325,7 +335,7 @@ void App::createGui() {
         button->eventManager().subscribe<vgui::Button::Click_Event>(this, [this, command](const vgui::Button::Click_Event &) {requestGitCommand(command);});
         return button;
     };
-    addGitButton(14, 76, L"Pull", L"git pull; карта сама пересканирует пришедшие правки и сравнится с тем, что было до pull", GitCommand::Pull);
+    addGitButton(14, 76, L"Pull", L"git pull; пришедшие правки карта пересканирует сама", GitCommand::Pull);
     pushButton = addGitButton(96, 76, L"Push", L"git push; нечего отправлять - кнопка недоступна", GitCommand::Push);
 
     auto *commitTitle = new vgui::Label(vgui::MySize<double>(70, 30), glm::dvec2(190, 14), fixedSize, inParent, glm::dvec2(0, 0), L"Коммит");
@@ -350,7 +360,7 @@ void App::createGui() {
 
     compareButton = new vgui::Button(vgui::MySize<double>(300, 34), glm::dvec2(-444, 12), fixedSize, inParent, glm::dvec2(0, 0), L"Прошлый коммит");
     compareButton->setTextAlignedLeft(true);
-    compareButton->setToolTip(L"С каким коммитом сравнивать карту: прошлый коммит, до последнего pull или любой из списка");
+    compareButton->setToolTip(L"С каким коммитом сравнивать карту: прошлый коммит или любой из списка");
     gitBar->addChild(compareButton);
     compareButton->eventManager().subscribe<vgui::Button::Click_Event>(this, [this](const vgui::Button::Click_Event &) {
         if (commitListWindow->visible())
@@ -730,7 +740,6 @@ void App::openProject(const std::wstring &root) {
     aheadCount = -1;
     headLogTime = 0;
     compareTarget = "previous";
-    beforePullCommit.clear();
     if (!gitDir.empty()) {
         readGitHead();
         std::ifstream choice(dataDir / "git.txt", std::ios::binary);
@@ -739,8 +748,6 @@ void App::openProject(const std::wstring &root) {
             std::vector<std::string> fields = splitFields(line);
             if (fields.size() >= 2 && fields[0] == "compare" && !fields[1].empty())
                 compareTarget = fields[1];
-            else if (fields.size() >= 2 && fields[0] == "before_pull")
-                beforePullCommit = fields[1];
         }
     }
     gitBar->setVisible(!gitDir.empty());
@@ -792,6 +799,7 @@ void App::showGraph(const std::string &selectedId) {
     updateSearch(searchEdit->text());
     statusLabel->setText(L"Узлов " + std::to_wstring(shownGraph.nodes.size()) + L", связей " + std::to_wstring(shownGraph.edges.size()));
     updateComparison();
+    updateDeadCode();
     mapView.invalidate();
     isDetailsDirty = true;
 }
@@ -815,8 +823,6 @@ void App::updateComparison() {
     std::wstring shortHash = stringToWString(compareCommit.substr(0, 7));
     if (compareTarget == "previous")
         compareButton->setText(L"Прошлый коммит" + (shortHash.empty() ? std::wstring() : L"  ·  " + shortHash));
-    else if (compareTarget == beforePullCommit)
-        compareButton->setText(L"До pull  ·  " + shortHash);
     else
         compareButton->setText(L"Коммит  ·  " + shortHash);
     if (gitDir.empty() || shownGraph.nodes.empty() || !diffCheck->getState())
@@ -1167,9 +1173,12 @@ void App::pollJob() {
     }
 
     case JobKind::LoadState:
+        // Разбор старой версии не читается - проект разбирается заново сам
         isScanStateLoaded = true;
         if (isJobSucceeded)
             scanState = std::move(jobState);
+        else
+            isScanRequested = true;
         Debug() << "CodeAtlas: разобранное загружено, файлов" << scanState.files.size() << "за" << seconds << "с";
         break;
 
@@ -1206,13 +1215,9 @@ void App::pollJob() {
             break;
         }
         if (jobGitCommand == GitCommand::Pull) {
-            // Пришли коммиты - карта сравнивается с тем, что было до pull
             std::string headAfter = Git::resolve(project.root, "HEAD");
             if (!jobHeadBefore.empty() && headAfter != jobHeadBefore) {
-                beforePullCommit = jobHeadBefore;
-                compareTarget = jobHeadBefore;
-                saveGitChoice();
-                statusLabel->setText(L"Pull: пришли коммиты, сравнение - с тем, что было до pull");
+                statusLabel->setText(L"Pull: пришли коммиты");
             } else {
                 statusLabel->setText(L"Pull: новых коммитов нет");
             }
@@ -1338,6 +1343,54 @@ void App::requestGitCommand(GitCommand command) {
 }
 
 
+// Мёртвый код: функции без вызовов и без обращений по имени (кроме входов, конструкторов, деструкторов, операторов, переопределений)
+void App::updateDeadCode() {
+    mapView.isDeadCodeShown = deadCodeCheck->getState();
+    mapView.deadNodes.assign(shownGraph.nodes.size(), 0);
+    mapView.invalidate();
+    isDetailsDirty = true;
+    if (!mapView.isDeadCodeShown)
+        return;
+
+    std::vector<char> isCalled(shownGraph.nodes.size(), 0);
+    for (const GraphEdge &edge : shownGraph.edges) {
+        if (edge.kind == EdgeKind::Call)
+            isCalled[edge.to] = 1;
+    }
+    static const std::set<std::wstring> entryNames = {L"main", L"wmain", L"WinMain", L"wWinMain", L"DllMain"};
+    static const std::set<std::wstring> rangeNames = {L"begin", L"end", L"cbegin", L"cend", L"rbegin", L"rend"};
+    int deadCount = 0;
+    for (int nodeIndex = 0; nodeIndex < int(shownGraph.nodes.size()); ++nodeIndex) {
+        const GraphNode &node = shownGraph.nodes[nodeIndex];
+        if (node.kind != NodeKind::Function || isCalled[nodeIndex] || node.isIndirect)
+            continue;
+
+        // Имя без класса; у метода - класс перед ним (конструктор зовётся как класс). У main шейдера - ветка в скобках после имени
+        // Без аргументов шаблона (конструктор шаблона - «Buffer::Buffer<T>»); begin и end зовёт цикл по диапазону неявно
+        std::wstring name = node.name.substr(0, node.name.find(L" ["));
+        size_t separator = name.rfind(L"::");
+        std::wstring shortName = separator == std::wstring::npos ? name : name.substr(separator + 2);
+        std::wstring owner = separator == std::wstring::npos ? std::wstring() : name.substr(0, separator);
+        size_t ownerSeparator = owner.rfind(L"::");
+        std::wstring ownerName = ownerSeparator == std::wstring::npos ? owner : owner.substr(ownerSeparator + 2);
+        bool isOperator = shortName.rfind(L"operator", 0) == 0;
+        shortName = isOperator ? shortName : shortName.substr(0, shortName.find(L'<'));
+        ownerName = ownerName.substr(0, ownerName.find(L'<'));
+        bool isSpecial = entryNames.count(shortName) > 0 || rangeNames.count(shortName) > 0 || isOperator || shortName.rfind(L"~", 0) == 0 ||
+                         (!ownerName.empty() && shortName == ownerName);
+        if (isSpecial)
+            continue;
+        mapView.deadNodes[nodeIndex] = 1;
+        ++deadCount;
+    }
+    int lastDigit = deadCount % 10;
+    int lastTwoDigits = deadCount % 100;
+    std::wstring functionsWord = lastDigit == 1 && lastTwoDigits != 11 ? L" функция" :
+                                 lastDigit >= 2 && lastDigit <= 4 && (lastTwoDigits < 12 || lastTwoDigits > 14) ? L" функции" : L" функций";
+    statusLabel->setText(L"Никто не вызывает: " + std::to_wstring(deadCount) + functionsWord);
+}
+
+
 // Кнопки git: коммит - только с сообщением, push - только когда есть неотправленные коммиты
 void App::updateGitButtons() {
     bool hasMessage = commitEdit->text().find_first_not_of(L" \t") != std::wstring::npos;
@@ -1446,8 +1499,6 @@ void App::openCommitList() {
     };
     addRow(L"Прошлый коммит" + (previousCommit.empty() ? std::wstring() : L"  ·  " + stringToWString(previousCommit.substr(0, 7))), "previous",
            L"Коммит перед последним: после нового коммита сравнение сдвигается само");
-    if (!beforePullCommit.empty())
-        addRow(L"До последнего pull  ·  " + stringToWString(beforePullCommit.substr(0, 7)), beforePullCommit, L"Что было до последнего pull, который принёс коммиты");
 
     y += 10;
     auto *title = new vgui::Label(vgui::MySize<double>(width, 22), glm::dvec2(left, y), fixedSize, inParent, glm::dvec2(0, 0), L"Коммиты ветки");
@@ -1472,13 +1523,13 @@ void App::openCommitList() {
 }
 
 
-// Запомнить выбор сравнения и HEAD до pull (папка данных проекта)
+// Запомнить выбор сравнения (папка данных проекта)
 void App::saveGitChoice() {
     std::filesystem::path path = std::filesystem::path(project.dataDir) / "git.txt";
     std::error_code errorCode;
     std::filesystem::create_directories(path.parent_path(), errorCode);
     std::ofstream file(path, std::ios::binary);
-    file << "compare\t" << escapeField(compareTarget) << "\nbefore_pull\t" << escapeField(beforePullCommit) << '\n';
+    file << "compare\t" << escapeField(compareTarget) << '\n';
 }
 
 
@@ -1727,6 +1778,7 @@ void App::rebuildDetails() {
         addLegendRow("changed", L"изменённое");
         addLegendRow("removed", L"удалённое");
         addLegendRow("uncommitted", L"не закоммичено");
+        addLegendRow("dead", L"не вызывается (мёртвый код)");
 
         y += 14;
         addLabel(L"УПРАВЛЕНИЕ", 12, accentColor);
@@ -1752,6 +1804,8 @@ void App::rebuildDetails() {
     }
     if (mapView.isUncommittedShown && nodeIndex < int(mapView.uncommittedNodes.size()) && mapView.uncommittedNodes[nodeIndex])
         kindText += L", не в коммите";
+    if (mapView.isDeadCodeShown && nodeIndex < int(mapView.deadNodes.size()) && mapView.deadNodes[nodeIndex])
+        kindText += L" - не вызывается";
     // Шапка: вид плашкой, владелец (класс, пространство имён) мелко, само имя крупно
     {
         glm::ivec3 kindColor = kindColors[int(node.kind)];

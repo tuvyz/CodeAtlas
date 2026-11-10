@@ -29,6 +29,8 @@ public:
     std::vector<char> uncommittedNodes;   // Узел graph правлен после последнего коммита (точка в углу блока)
     std::vector<char> uncommittedGhosts;  // Призрак из removedNodes удалён после последнего коммита
     bool isUncommittedShown = false;
+    std::vector<char> deadNodes;          // Функцию никто не вызывает (мёртвый код)
+    bool isDeadCodeShown = false;         // Выделять мёртвый код вместо изменений
     Layout *layout = nullptr;
 
     // Фильтры связей: вызовы, чтение и запись данных, все связи без выбора

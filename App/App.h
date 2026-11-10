@@ -57,7 +57,6 @@ private:
     std::string upstreamRef;                   // Ветка, за которой следит текущая (origin/master), пусто - не задана
     int aheadCount = -1;                       // Неотправленных коммитов (-1 - ветки для отправки нет)
     std::string compareTarget = "previous";    // С чем сравнивать: previous - прошлый коммит (следует за HEAD), иначе хэш
-    std::string beforePullCommit;              // HEAD до последнего pull, который принёс коммиты
     std::string compareCommit;                 // Хэш, с которым сравнивается карта сейчас (пусто - не с чем)
     std::map<std::string, Graph> commitGraphs;
     std::set<std::string> failedCommits;       // Графы этих коммитов не собрались - не повторять
@@ -103,7 +102,7 @@ private:
     std::atomic<int> jobFilesRead = 0;
     GitCommand jobGitCommand = GitCommand::None;
     std::string jobGitOutput;
-    std::string jobHeadBefore;                 // HEAD до pull
+    std::string jobHeadBefore;                 // HEAD до pull (пришли ли коммиты)
     std::chrono::steady_clock::time_point jobStartTime;
     bool isScanRequested = false;
     GitCommand requestedGitCommand = GitCommand::None;
@@ -120,6 +119,7 @@ private:
     vgui::CheckBox *callsCheck = nullptr;
     vgui::CheckBox *dataCheck = nullptr;
     vgui::CheckBox *allEdgesCheck = nullptr;
+    vgui::CheckBox *deadCodeCheck = nullptr;
     vgui::ScrollAreaWidget *detailsPanel = nullptr;
     vgui::ScrollAreaWidget *gitBar = nullptr;
     vgui::LineEdit *commitEdit = nullptr;
@@ -184,13 +184,15 @@ private:
     void requestGitCommand(GitCommand command);
     // Кнопки git: коммит - только с сообщением, push - только когда есть неотправленные коммиты
     void updateGitButtons();
+    // Мёртвый код: функции без вызовов и без обращений по имени (кроме входов, конструкторов, деструкторов, операторов, переопределений)
+    void updateDeadCode();
     // HEAD, прошлый коммит, ветка отправки и неотправленные коммиты - заново из git
     void readGitHead();
     // Окно вывода git (ошибка pull, коммита, push) с кнопкой терминала
     void showGitOutput(const std::wstring &title, const std::string &output);
     // Список коммитов для сравнения над полосой снизу
     void openCommitList();
-    // Запомнить выбор сравнения и HEAD до pull (папка данных проекта)
+    // Запомнить выбор сравнения (папка данных проекта)
     void saveGitChoice();
     // Список ранее открытых проектов: в файл и в список сверху
     void updateRecentProjects(const std::wstring &openedRoot);
