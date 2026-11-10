@@ -34,19 +34,19 @@ enum class DiffState : uint8_t {
 
 
 // История: снимок графа на каждое сканирование, по одному на коммит (повторное сканирование того же коммита заменяет снимок).
-// Хранится в <проект>/.codeatlas/history: index.txt и графы снимков
+// Хранится в папке данных проекта у CodeAtlas (history: index.txt и графы снимков)
 class History {
 public:
     std::vector<Snapshot> snapshots;
 
-    // Загрузка списка снимков проекта
-    bool load(const std::wstring &projectRoot);
+    // Загрузка списка снимков из папки данных проекта
+    bool load(const std::wstring &dataDir);
 
     // Снимок графа на текущем коммите проекта; возвращает индекс снимка
-    int add(const std::wstring &projectRoot, const Graph &graph);
+    int add(const std::wstring &dataDir, const std::wstring &projectRoot, const Graph &graph);
 
     // Граф снимка
-    bool loadGraph(const std::wstring &projectRoot, int snapshotIndex, Graph &graph) const;
+    bool loadGraph(const std::wstring &dataDir, int snapshotIndex, Graph &graph) const;
 
     // Подпись снимка для полосы истории: дата, хэш, заголовок
     std::wstring describe(int snapshotIndex) const;
@@ -61,7 +61,7 @@ private:
     // Вывод команды git в папке проекта
     static bool runGit(const std::wstring &projectRoot, const std::wstring &arguments, std::string &output);
     // Запись списка снимков
-    bool saveIndex(const std::wstring &projectRoot) const;
+    bool saveIndex(const std::wstring &dataDir) const;
 };
 
 

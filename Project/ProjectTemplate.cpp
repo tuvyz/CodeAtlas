@@ -13,6 +13,18 @@ bool ProjectTemplate::load(const std::wstring &projectRoot) {
     writeCalls.clear();
     eventRegex.clear();
 
+    // Папка данных у CodeAtlas: в ней же выбранная в окне папка сборки и путь проекта (чтобы было видно, чья папка)
+    dataDir = dataDirFor(root).generic_wstring();
+    compileCommandsOverride.clear();
+    {
+        std::ifstream overrideFile(std::filesystem::path(dataDir) / "compile_commands.txt", std::ios::binary);
+        std::string overridePath;
+        if (std::getline(overrideFile, overridePath))
+            compileCommandsOverride = stringToWString(overridePath);
+        std::ofstream projectFile(std::filesystem::path(dataDir) / "project.txt", std::ios::binary);
+        projectFile << wstringToString(root) << '\n';
+    }
+
     std::ifstream file(std::filesystem::path(root) / "codeatlas.yaml");
     if (!file)
         return false;
@@ -103,3 +115,44 @@ std::wstring ProjectTemplate::projectRelativePath(const std::wstring &absolutePa
         return std::wstring();
     return relative;
 }
+
+
+// Запомнить папку с compile_commands.json для проекта (в папке данных)
+bool ProjectTemplate::saveCompileCommandsOverride(const std::wstring &folder) {
+    compileCommandsOverride = std::filesystem::path(folder).generic_wstring();
+    std::ofstream file(std::filesystem::path(dataDir) / "compile_commands.txt", std::ios::binary);
+    file << wstringToString(compileCommandsOverride) << '\n';
+    return bool(file);
+}
+
+
+// Папка данных проекта: <папка программы>/Projects/<имя папки проекта>-<хэш пути> (папка программы закрыта на запись - папка настроек пользователя)
+std::filesystem::path ProjectTemplate::dataDirFor(const std::wstring &projectRoot) {
+    // Хэш FNV-1a пути в нижнем регистре: проекты с одинаковым именем папки не смешиваются
+    std::wstring key = std::filesystem::path(projectRoot).lexically_normal().generic_wstring();
+    uint64_t hash = 14695981039346656037ull;
+    for (wchar_t character : key) {
+        hash ^= uint64_t(std::towlower(character));
+        hash *= 1099511628211ull;
+    }
+    char hashText[16];
+    std::snprintf(hashText, sizeof(hashText), "%08x", unsigned(hash & 0xFFFFFFFFu));
+    std::wstring folderName = std::filesystem::path(key).filename().wstring() + L"-" + stringToWString(hashText);
+
+    std::error_code errorCode;
+    char *basePath = SDL_GetBasePath();
+    std::filesystem::path result = basePath != nullptr ? std::filesystem::u8path(basePath) / "Projects" / folderName : std::filesystem::path();
+    SDL_free(basePath);
+    if (!result.empty()) {
+        std::filesystem::create_directories(result, errorCode);
+        if (std::filesystem::is_directory(result, errorCode))
+            return result;
+    }
+
+    char *prefPath = SDL_GetPrefPath("tuvyz", "CodeAtlas");
+    result = prefPath != nullptr ? std::filesystem::u8path(prefPath) / "Projects" / folderName : std::filesystem::path("Projects") / folderName;
+    SDL_free(prefPath);
+    std::filesystem::create_directories(result, errorCode);
+    return result;
+}
+

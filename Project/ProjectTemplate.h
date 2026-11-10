@@ -5,7 +5,10 @@
 #include <vector>
 #include <fstream>
 #include <filesystem>
+#include <cstdio>
+#include <cstdint>
 #include <cwctype>
+#include <SDL.h>
 #include "Global/Strings.h"
 
 
@@ -19,12 +22,20 @@ struct ProjectTemplate {
     std::vector<std::string> componentCalls; // Вызовы, чей шаблонный аргумент - компонент (view, get, emplace и т.п.)
     std::vector<std::string> writeCalls;     // Из них - запись в компонент (emplace, remove и т.п.), остальные - чтение
     std::string eventRegex;                  // Компонент с таким именем - событие
+    std::wstring dataDir;                    // Папка данных проекта у CodeAtlas (раскладка, история): в проект ничего не пишется
+    std::wstring compileCommandsOverride;    // Папка с compile_commands.json, выбранная в окне (хранится в папке данных), пусто - не выбрана
 
     // Загрузка шаблона из корня проекта; без файла - значения по умолчанию (флаги сборки в build)
     bool load(const std::wstring &projectRoot);
 
     // Путь файла от корня проекта через /, пустой - файл вне проекта или в исключённой папке
     std::wstring projectRelativePath(const std::wstring &absolutePath) const;
+
+    // Запомнить папку с compile_commands.json для проекта (в папке данных)
+    bool saveCompileCommandsOverride(const std::wstring &folder);
+
+    // Папка данных проекта: <папка программы>/Projects/<имя папки проекта>-<хэш пути> (папка программы закрыта на запись - папка настроек пользователя)
+    static std::filesystem::path dataDirFor(const std::wstring &projectRoot);
 };
 
 

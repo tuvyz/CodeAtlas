@@ -191,14 +191,26 @@ void App::createGui() {
     topBar->addChild(projectEdit);
 
     auto *browseButton = new vgui::Button(vgui::MySize<double>(36, 34), glm::dvec2(586, 11), fixedSize, inParent, glm::dvec2(0, 0), L"…");
-    browseButton->setToolTip(L"Выбрать CMakeLists.txt или codeatlas.yaml в корне проекта");
+    browseButton->setToolTip(L"CMakeLists.txt или codeatlas.yaml - открыть проект; compile_commands.json - папка сборки открытого проекта");
     topBar->addChild(browseButton);
     browseButton->eventManager().subscribe<vgui::Button::Click_Event>(this, [this](const vgui::Button::Click_Event &) {
         vgui::FileDialog dialog;
-        std::wstring path = dialog.openFileName(L"Корень проекта", projectEdit->text(),
-                                                {L"Корень проекта (CMakeLists.txt, codeatlas.yaml)", L"CMakeLists.txt;codeatlas.yaml", L"Все файлы", L"*.*"});
-        if (!path.empty())
-            projectEdit->setText(std::filesystem::path(path).parent_path().generic_wstring());
+        std::wstring path = dialog.openFileName(L"Проект или его сборка", projectEdit->text(),
+                                                {L"Проект и сборка (CMakeLists.txt, codeatlas.yaml, compile_commands.json)",
+                                                 L"CMakeLists.txt;codeatlas.yaml;compile_commands.json", L"Все файлы", L"*.*"});
+        if (path.empty())
+            return;
+        std::filesystem::path chosen(path);
+        if (chosen.filename() == "compile_commands.json") {
+            if (project.root.empty()) {
+                statusLabel->setText(L"Сначала открыть проект, потом указать его compile_commands.json");
+                return;
+            }
+            project.saveCompileCommandsOverride(chosen.parent_path().wstring());
+            statusLabel->setText(L"Папка сборки: " + chosen.parent_path().generic_wstring());
+            return;
+        }
+        openProject(chosen.parent_path().generic_wstring());
     });
 
     auto *openButton = new vgui::Button(vgui::MySize<double>(100, 34), glm::dvec2(628, 11), fixedSize, inParent, glm::dvec2(0, 0), L"Открыть");
@@ -319,26 +331,7 @@ void App::saveLayout() {
     layout.cameraCenter = mapView.cameraCenter;
     layout.cameraZoom = mapView.zoom;
     layout.hasCamera = true;
-    std::filesystem::path folder = std::filesystem::path(project.root) / ".codeatlas";
-    layout.save((folder / "layout.txt").wstring());
-
-    // Раскладку можно хранить в git вместе с проектом, историю, граф и копию compile_commands.json - нет (недостающие строки дописываются)
-    std::string ignoreText;
-    {
-        std::ifstream ignore(folder / ".gitignore", std::ios::binary);
-        ignoreText.assign(std::istreambuf_iterator<char>(ignore), std::istreambuf_iterator<char>());
-    }
-    std::string missingLines;
-    for (const char *line : {"history/", "graph.txt", "compile_commands.json"}) {
-        if (ignoreText.find(line) == std::string::npos)
-            missingLines += std::string(line) + "\n";
-    }
-    if (!missingLines.empty()) {
-        std::ofstream ignore(folder / ".gitignore", std::ios::binary | std::ios::app);
-        if (!ignoreText.empty() && ignoreText.back() != '\n')
-            ignore << '\n';
-        ignore << missingLines;
-    }
+    layout.save((std::filesystem::path(project.dataDir) / "layout.txt").wstring());
 }
 
 
@@ -357,11 +350,26 @@ void App::openProject(const std::wstring &root) {
 
     Debug() << "CodeAtlas: открытие проекта" << wstringToString(root);
     bool hasTemplate = project.load(root);
-    layout.load((std::filesystem::path(project.root) / ".codeatlas" / "layout.txt").wstring());
+
+    // Данные старых версий (папка .codeatlas в проекте) - в папку данных у CodeAtlas, из проекта убираются
+    std::filesystem::path oldFolder = std::filesystem::path(project.root) / ".codeatlas";
+    std::filesystem::path dataFolder(project.dataDir);
+    if (std::filesystem::is_directory(oldFolder, errorCode)) {
+        if (!std::filesystem::exists(dataFolder / "layout.txt", errorCode) && std::filesystem::exists(oldFolder / "layout.txt", errorCode))
+            std::filesystem::copy_file(oldFolder / "layout.txt", dataFolder / "layout.txt", errorCode);
+        if (!std::filesystem::exists(dataFolder / "history", errorCode) && std::filesystem::exists(oldFolder / "history", errorCode))
+            std::filesystem::copy(oldFolder / "history", dataFolder / "history", std::filesystem::copy_options::recursive, errorCode);
+        for (const char *name : {"layout.txt", "graph.txt", "compile_commands.json", ".gitignore"})
+            std::filesystem::remove(oldFolder / name, errorCode);
+        std::filesystem::remove_all(oldFolder / "history", errorCode);
+        std::filesystem::remove(oldFolder, errorCode);
+        Debug() << "CodeAtlas: данные из" << oldFolder.string() << "перенесены в" << dataFolder.string();
+    }
+    layout.load((dataFolder / "layout.txt").wstring());
     bool hasSavedCamera = layout.hasCamera;
     glm::dvec2 savedCameraCenter = layout.cameraCenter;
     double savedCameraZoom = layout.cameraZoom;
-    history.load(project.root);
+    history.load(project.dataDir);
     mapView.layout = &layout;
     mapView.graph = nullptr;
     mapView.previousGraph = nullptr;
@@ -399,14 +407,14 @@ void App::showSnapshot(int snapshotIndex) {
     if (snapshotIndex < 0 || snapshotIndex >= int(history.snapshots.size()))
         return;
     std::string selectedId = mapView.graph != nullptr && mapView.selectedNode >= 0 ? mapView.graph->nodes[mapView.selectedNode].id : std::string();
-    if (!history.loadGraph(project.root, snapshotIndex, shownGraph)) {
+    if (!history.loadGraph(project.dataDir, snapshotIndex, shownGraph)) {
         statusLabel->setText(L"Не прочитан снимок истории");
         return;
     }
 
     // Сравнение с предыдущим снимком
     previousGraph.clear();
-    if (snapshotIndex > 0 && history.loadGraph(project.root, snapshotIndex - 1, previousGraph)) {
+    if (snapshotIndex > 0 && history.loadGraph(project.dataDir, snapshotIndex - 1, previousGraph)) {
         History::compare(previousGraph, shownGraph, mapView.diffStates, mapView.removedNodes);
     } else {
         mapView.diffStates.assign(shownGraph.nodes.size(), DiffState::Same);
@@ -491,7 +499,7 @@ void App::pollScan() {
         statusLabel->setText(scanError);
         return;
     }
-    int snapshotIndex = history.add(project.root, scanGraph);
+    int snapshotIndex = history.add(project.dataDir, project.root, scanGraph);
     showSnapshot(snapshotIndex);
     int errorsCount = analyzer.unitsWithErrors;
     if (errorsCount > 0)
@@ -583,8 +591,10 @@ void App::rebuildDetails() {
         addLabel(L"Карты ещё нет", 18, inkColor);
         y += 8;
         addParagraph(L"1. В CMakeLists.txt проекта: set(CMAKE_EXPORT_COMPILE_COMMANDS ON) и собрать (Ninja или Makefile) - появится "
-                     L"compile_commands.json в папке сборки.\n2. В корне проекта по желанию codeatlas.yaml: папка сборки, исключения, "
-                     L"вызовы компонентов (docs/PROJECT_TEMPLATE.md).\n3. Открыть папку проекта и нажать «Сканировать».", 14, inkColor);
+                     L"compile_commands.json в папке сборки.\n2. Открыть папку проекта и нажать «Сканировать». Папку сборки CodeAtlas ищет сам; "
+                     L"не нашёл - указать её compile_commands.json кнопкой «…».\n3. По желанию в корне проекта codeatlas.yaml: исключения, "
+                     L"вызовы компонентов (docs/PROJECT_TEMPLATE.md).\n\nРаскладка и история хранятся у CodeAtlas (Projects рядом с программой), "
+                     L"в проект ничего не пишется.", 14, inkColor);
         return;
     }
 

@@ -35,7 +35,7 @@ public:
     // Сканирование проекта по compile_commands.json; error - причина, если не вышло
     bool scan(const ProjectTemplate &project, Graph &graph, std::wstring &error);
 
-    // Папка с compile_commands.json: из шаблона, а нет там - самая свежая в папках проекта до трёх уровней (сборки Qt Creator и т.п.)
+    // Папка с compile_commands.json: выбранная в окне, из шаблона, а нет там - самая свежая в папках проекта до трёх уровней и в соседних build-<проект>-...
     static std::filesystem::path findCompileCommandsDir(const ProjectTemplate &project);
 
     // Папка встроенных заголовков clang (stddef.h, intrin и т.п.): CODEATLAS_CLANG_RESOURCE_DIR или lib/clang/<версия> в LLVM сборки, пусто - libclang ищет сам

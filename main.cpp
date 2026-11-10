@@ -1,7 +1,7 @@
 #include "App/App.h"
 
 
-// Сканирование без окна: CodeAtlas --scan <корень проекта> [--out <файл графа>]; граф по умолчанию - <корень>/.codeatlas/graph.txt
+// Сканирование без окна: CodeAtlas --scan <корень проекта> [--out <файл графа>]; граф по умолчанию - graph.txt в папке данных проекта
 static int runScanCommand(const std::string &root, const std::string &outPath) {
     ProjectTemplate project;
     if (!project.load(stringToWString(root)))
@@ -25,7 +25,7 @@ static int runScanCommand(const std::string &root, const std::string &outPath) {
     Debug() << "Функций" << kindCounts[0] << ", типов" << kindCounts[1] << ", компонентов" << kindCounts[2] << ", событий" << kindCounts[3];
     Debug() << "Вызовов" << edgeCounts[0] << ", чтений" << edgeCounts[1] << ", записей" << edgeCounts[2];
 
-    std::wstring path = outPath.empty() ? project.root + L"/.codeatlas/graph.txt" : stringToWString(outPath);
+    std::wstring path = outPath.empty() ? project.dataDir + L"/graph.txt" : stringToWString(outPath);
     if (!graph.save(path)) {
         Debug() << "Не записан граф" << wstringToString(path);
         return 1;

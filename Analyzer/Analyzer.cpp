@@ -506,13 +506,13 @@ private:
 
 
 
-// Папка с compile_commands.json: из шаблона, а нет там - самая свежая в папках проекта до трёх уровней (сборки Qt Creator и т.п.)
+// Папка с compile_commands.json: выбранная в окне, из шаблона, а нет там - самая свежая в папках проекта до трёх уровней и в соседних build-<проект>-...
 std::filesystem::path Analyzer::findCompileCommandsDir(const ProjectTemplate &project) {
-    // Сначала - папка из шаблона, потом .codeatlas проекта (туда его может копировать сборка проекта)
+    // Сначала - папка, выбранная в окне, потом папка из шаблона
     std::filesystem::path root(project.root);
     std::error_code errorCode;
-    for (std::filesystem::path folder : {root / project.compileCommandsDir, root / ".codeatlas"}) {
-        if (std::filesystem::exists(folder / "compile_commands.json", errorCode))
+    for (std::filesystem::path folder : {std::filesystem::path(project.compileCommandsOverride), root / project.compileCommandsDir}) {
+        if (!folder.empty() && std::filesystem::exists(folder / "compile_commands.json", errorCode))
             return folder;
     }
 
@@ -584,7 +584,7 @@ bool Analyzer::scan(const ProjectTemplate &project, Graph &graph, std::wstring &
     std::filesystem::path compileDir = findCompileCommandsDir(project);
     if (compileDir.empty()) {
         error = L"Не найден compile_commands.json: в CMakeLists.txt проекта set(CMAKE_EXPORT_COMPILE_COMMANDS ON), генератор Ninja, пересобрать; "
-                L"папку сборки - в codeatlas.yaml (compile_commands)";
+                L"файл указать кнопкой «…»";
         return false;
     }
     CXCompilationDatabase_Error databaseError;

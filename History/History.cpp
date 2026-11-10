@@ -74,10 +74,10 @@ bool History::gitHead(const std::wstring &projectRoot, std::string &commit, std:
 }
 
 
-// Загрузка списка снимков проекта
-bool History::load(const std::wstring &projectRoot) {
+// Загрузка списка снимков из папки данных проекта
+bool History::load(const std::wstring &dataDir) {
     snapshots.clear();
-    std::ifstream file(std::filesystem::path(projectRoot) / ".codeatlas" / "history" / "index.txt", std::ios::binary);
+    std::ifstream file(std::filesystem::path(dataDir) / "history" / "index.txt", std::ios::binary);
     if (!file)
         return false;
     std::string line;
@@ -101,8 +101,8 @@ bool History::load(const std::wstring &projectRoot) {
 }
 
 // Запись списка снимков
-bool History::saveIndex(const std::wstring &projectRoot) const {
-    std::ofstream file(std::filesystem::path(projectRoot) / ".codeatlas" / "history" / "index.txt", std::ios::binary);
+bool History::saveIndex(const std::wstring &dataDir) const {
+    std::ofstream file(std::filesystem::path(dataDir) / "history" / "index.txt", std::ios::binary);
     if (!file)
         return false;
     // Строка снимка: S, файл графа, коммит, время коммита, время сканирования, правки поверх, заголовок коммита
@@ -115,7 +115,7 @@ bool History::saveIndex(const std::wstring &projectRoot) const {
 
 
 // Снимок графа на текущем коммите проекта; возвращает индекс снимка
-int History::add(const std::wstring &projectRoot, const Graph &graph) {
+int History::add(const std::wstring &dataDir, const std::wstring &projectRoot, const Graph &graph) {
     Snapshot snapshot;
     gitHead(projectRoot, snapshot.commit, snapshot.subject, snapshot.commitTime, snapshot.isDirty);
     snapshot.scanTime = int64_t(std::time(nullptr));
@@ -133,21 +133,21 @@ int History::add(const std::wstring &projectRoot, const Graph &graph) {
         snapshots.push_back(snapshot);
     }
 
-    std::filesystem::path folder = std::filesystem::path(projectRoot) / ".codeatlas" / "history";
+    std::filesystem::path folder = std::filesystem::path(dataDir) / "history";
     std::error_code errorCode;
     std::filesystem::create_directories(folder, errorCode);
     if (!graph.save((folder / snapshot.fileName).wstring()))
         Debug() << "Не записан снимок" << (folder / snapshot.fileName).string();
-    saveIndex(projectRoot);
+    saveIndex(dataDir);
     return index;
 }
 
 
 // Граф снимка
-bool History::loadGraph(const std::wstring &projectRoot, int snapshotIndex, Graph &graph) const {
+bool History::loadGraph(const std::wstring &dataDir, int snapshotIndex, Graph &graph) const {
     if (snapshotIndex < 0 || snapshotIndex >= int(snapshots.size()))
         return false;
-    return graph.load((std::filesystem::path(projectRoot) / ".codeatlas" / "history" / snapshots[snapshotIndex].fileName).wstring());
+    return graph.load((std::filesystem::path(dataDir) / "history" / snapshots[snapshotIndex].fileName).wstring());
 }
 
 
