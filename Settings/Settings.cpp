@@ -58,6 +58,10 @@ void Settings::load() {
             wheelZoomStep = std::clamp(value, 5.0, 60.0);
         else if (key == "scan_threads")
             scanThreads = std::clamp(int(value), 0, 64);
+        else if (key == "node_size_mode")
+            nodeSizeMode = std::clamp(int(value), 0, 2);
+        else if (key == "lines_per_step")
+            linesPerStep = std::clamp(value, 5.0, 200.0);
     }
 }
 
@@ -72,6 +76,8 @@ bool Settings::save() const {
          << "note_text_size: " << noteTextSize << '\n'
          << "edge_thickness: " << edgeThickness << '\n'
          << "wheel_zoom_step: " << wheelZoomStep << '\n'
-         << "scan_threads: " << scanThreads << '\n';
+         << "scan_threads: " << scanThreads << '\n'
+         << "node_size_mode: " << nodeSizeMode << '\n'
+         << "lines_per_step: " << linesPerStep << '\n';
     return bool(file);
 }

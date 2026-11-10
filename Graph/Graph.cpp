@@ -40,13 +40,14 @@ bool Graph::save(const std::wstring &path) const {
     if (!file)
         return false;
 
-    // Строка узла: N, id, вид, имя, полное имя, сигнатура, файл, строка, хэш тела, комментарий; строка связи: E, id источника, id приёмника, вид, порядок
-    file << "codeatlas-graph\t1\n";
+    // Строка узла: N, id, вид, имя, полное имя, сигнатура, файл, строка, хэш тела, комментарий, строк в определении;
+    // строка связи: E, id источника, id приёмника, вид, порядок
+    file << "codeatlas-graph\t2\n";
     for (const GraphNode &node : nodes) {
         file << "N\t" << escapeField(node.id) << '\t' << int(node.kind) << '\t' << escapeField(wstringToString(node.name)) << '\t'
              << escapeField(wstringToString(node.qualifiedName)) << '\t' << escapeField(wstringToString(node.signature)) << '\t'
              << escapeField(wstringToString(node.file)) << '\t' << node.line << '\t' << node.bodyHash << '\t'
-             << escapeField(wstringToString(node.comment)) << '\n';
+             << escapeField(wstringToString(node.comment)) << '\t' << node.lineCount << '\n';
     }
     for (const GraphEdge &edge : edges) {
         file << "E\t" << escapeField(nodes[edge.from].id) << '\t' << escapeField(nodes[edge.to].id) << '\t' << int(edge.kind) << '\t' << edge.order << '\n';
@@ -81,6 +82,7 @@ bool Graph::load(const std::wstring &path) {
             node.line = std::stoi(fields[7]);
             node.bodyHash = std::stoull(fields[8]);
             node.comment = stringToWString(fields[9]);
+            node.lineCount = fields.size() >= 11 ? std::atoi(fields[10].c_str()) : 0;
             addNode(node);
         } else if (fields.size() >= 5 && fields[0] == "E") {
             int from = findNode(fields[1]);

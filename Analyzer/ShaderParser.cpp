@@ -270,6 +270,7 @@ bool ShaderParser::parse(const std::filesystem::path &path, ShaderFile &file) {
                     hash *= 1099511628211ull;
                 }
                 function.bodyHash = hash;
+                function.lineCount = lineOf(close) - declarationLine + 1;
 
                 // Вызовы: имя и сразу (через пробелы) открывающая скобка; по первому появлению
                 std::set<std::string> seen;

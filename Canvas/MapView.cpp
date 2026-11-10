@@ -399,8 +399,19 @@ void MapView::buildScene() {
         } else if (shapeKind == ShapeKind::Parallelogram) {
             textLeft = 15;
         }
-        font.addText(nodeLayer, node.name, glm::vec2(rect.position) + glm::vec2(textLeft, float(rect.size.y) * 0.5f), float(Layout::nodeTextSize()),
+        // Имя - в верхней клетке; у блока в несколько клеток под именем число строк
+        float topMiddle = float(Layout::nodeHeight()) * 0.5f;
+        font.addText(nodeLayer, node.name, glm::vec2(rect.position) + glm::vec2(textLeft, topMiddle), float(Layout::nodeTextSize()),
                      text, glm::vec2(0, 0), float(rect.size.x) - textLeft - 8);
+        if (Layout::nodeRows(node) > 1) {
+            int lastDigit = node.lineCount % 10;
+            int lastTwoDigits = node.lineCount % 100;
+            std::wstring linesWord = lastDigit == 1 && lastTwoDigits != 11 ? L" строка" :
+                                     lastDigit >= 2 && lastDigit <= 4 && (lastTwoDigits < 12 || lastTwoDigits > 14) ? L" строки" : L" строк";
+            glm::vec4 linesColor = glm::mix(text, glm::vec4(fill.r, fill.g, fill.b, text.a), 0.45f);
+            font.addText(nodeLayer, std::to_wstring(node.lineCount) + linesWord, glm::vec2(rect.position) + glm::vec2(textLeft, topMiddle * 2.6f),
+                         float(Layout::nodeTextSize()) * 0.85f, linesColor);
+        }
     }
 
     // Призраки удалённых узлов: пунктир на старом месте
@@ -412,7 +423,7 @@ void MapView::buildScene() {
                 continue;
             LayoutRect rect{found->second, Layout::nodeSize(node)};
             nodeLayer.shapes.push_back(boxShape(rect, ShapeKind::DashedBox, 6, hexColor(0xF4F2ED, 0.6f), hexColor(0xB04848), 1.4f));
-            font.addText(nodeLayer, node.name, glm::vec2(rect.position) + glm::vec2(12, float(rect.size.y) * 0.5f), float(Layout::nodeTextSize()),
+            font.addText(nodeLayer, node.name, glm::vec2(rect.position) + glm::vec2(12, float(Layout::nodeHeight()) * 0.5f), float(Layout::nodeTextSize()),
                          hexColor(0xA05A5A), glm::vec2(0, 0), float(rect.size.x) - 20);
         }
     }

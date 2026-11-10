@@ -64,7 +64,9 @@ public:
     double cameraZoom = 1;                            // Пикселей экрана на единицу холста
     bool hasCamera = false;                           // Вид сохранён
 
-    // Размер блока узла
+    // Клеток сетки по высоте у блока узла: у функции - по числу строк (как задано в настройках), у остальных - одна
+    static int nodeRows(const GraphNode &node);
+    // Размер блока узла: в несколько клеток - вместе с зазорами между ними, так блоки остаются в сетке
     static glm::dvec2 nodeSize(const GraphNode &node);
     // Размер пометки
     static glm::dvec2 noteSize(const LayoutNote &note);
@@ -110,11 +112,12 @@ private:
     static glm::dvec2 packFiles(const Graph &graph, const std::map<std::wstring, std::vector<int>> &byFile, const std::vector<std::wstring> &files,
                                 const std::wstring &base, std::map<std::wstring, glm::dvec2> &fileOffsets);
     // Раскладка блоков файла сеткой от левого верхнего угла рамки: типы сверху, дальше по строкам определения
-    void placeFileGrid(const Graph &graph, std::vector<int> nodes, glm::dvec2 frameTopLeft);
+    void placeFileGrid(const Graph &graph, const std::vector<int> &nodes, glm::dvec2 frameTopLeft);
     // Размер рамки файла с сеткой из всех его блоков
     static glm::dvec2 fileGridFrameSize(const Graph &graph, const std::vector<int> &nodes);
-    // Столбцов в сетке файла
-    static int fileGridColumns(int nodesCount);
+    // Сетка файла: места блоков от левого верхнего угла рамки и размер рамки. Блоки идут по столбцам сверху вниз, столбец
+    // заполняется до средней высоты (высокие блоки занимают несколько клеток); столбцов - около корня из трети клеток
+    static std::vector<std::pair<int, glm::dvec2>> fileGrid(const Graph &graph, std::vector<int> nodes, glm::dvec2 &frameSize);
 };
 
 

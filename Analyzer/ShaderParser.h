@@ -33,6 +33,7 @@ struct ShaderFunction {
     int line = 0;
     std::string comment;
     uint64_t bodyHash = 0;
+    int lineCount = 0;
     std::vector<ShaderBranch> branches;
     std::vector<std::string> calledNames;
 };

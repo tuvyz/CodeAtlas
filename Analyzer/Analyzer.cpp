@@ -242,6 +242,15 @@ private:
     }
 
     // Хэш текста определения: по нему снимки различают изменённые узлы
+    // Строк в определении (от первой до последней строки курсора)
+    static int extentLineCount(CXCursor cursor) {
+        CXSourceRange extent = clang_getCursorExtent(cursor);
+        unsigned startLine = 0, endLine = 0;
+        clang_getExpansionLocation(clang_getRangeStart(extent), nullptr, &startLine, nullptr, nullptr);
+        clang_getExpansionLocation(clang_getRangeEnd(extent), nullptr, &endLine, nullptr, nullptr);
+        return endLine >= startLine ? int(endLine - startLine + 1) : 0;
+    }
+
     uint64_t extentHash(CXCursor cursor) {
         CXSourceRange extent = clang_getCursorExtent(cursor);
         CXFile file;
@@ -336,6 +345,7 @@ private:
         node.line = line;
         node.comment = declarationComment(cursor);
         node.bodyHash = extentHash(cursor);
+        node.lineCount = extentLineCount(cursor);
         result.nodes.push_back(node);
     }
 
@@ -378,6 +388,7 @@ private:
         node.line = line;
         node.comment = declarationComment(cursor);
         node.bodyHash = extentHash(cursor);
+        node.lineCount = extentLineCount(cursor);
         result.nodes.push_back(node);
 
         FunctionVisit function;
@@ -736,6 +747,7 @@ void addShaders(const ShaderCatalog &catalog, const std::vector<WorkerResult> &r
             node.line = function.line;
             node.comment = stringToWString(function.comment);
             node.bodyHash = function.bodyHash;
+            node.lineCount = function.lineCount;
             int nodeIndex = graph.addNode(node);
             nodesOfFile[file].push_back(nodeIndex);
             functionOfNode[nodeIndex] = &function;
