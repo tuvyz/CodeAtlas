@@ -15,6 +15,7 @@ file(GLOB_RECURSE CODEATLAS_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_SOURCE_DIR}/Canvas/*.cpp"
     "${CMAKE_SOURCE_DIR}/App/*.cpp"
     "${CMAKE_SOURCE_DIR}/Settings/*.cpp"
+    "${CMAKE_SOURCE_DIR}/Ide/*.cpp"
 )
 list(APPEND CODEATLAS_SOURCES "${CMAKE_SOURCE_DIR}/main.cpp")
 

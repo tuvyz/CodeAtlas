@@ -438,6 +438,32 @@ void App::createSettingsWindow() {
            [](double value) {settings().scanThreads = int(std::lround(value));},
            [](double value) {return value < 0.5 ? std::wstring(L"авто") : std::to_wstring(int(std::lround(value)));});
 
+    // Команда IDE: пусто - Qt Creator, найденный сам
+    y += 8;
+    addSection(L"IDE");
+    {
+        auto *ideEdit = new vgui::LineEdit(vgui::MySize<double>(windowWidth - 2 * left, 32), glm::dvec2(left, y), fixedSize, inParent, glm::dvec2(0, 0),
+                                           settings().ideCommand);
+        ideEdit->setToolTip(L"Команда открытия файла: {file} - файл, {line} - строка, {project} - CMakeLists.txt или .pro проекта. "
+                            L"Пусто - Qt Creator: уже открыт - файл откроется в нём, нет - запустится с проектом");
+        settingsWindow->addChild(ideEdit);
+        ideEdit->eventManager().subscribe<vgui::LineEdit::TextChanged_Event>(this, [this](const vgui::LineEdit::TextChanged_Event &event) {
+            settings().ideCommand = event.text;
+            isSettingsChanged = true;
+        });
+        settingsRowUpdaters.push_back([ideEdit]() {ideEdit->setText(settings().ideCommand);});
+        y += 38;
+        std::filesystem::path qtCreator = IdeLauncher::findQtCreator();
+        std::wstring found = qtCreator.empty() ? L"Пусто - Qt Creator; не найден, нужна команда" : L"Пусто - Qt Creator: " + qtCreator.generic_wstring();
+        for (const std::wstring &line : wrapText(found, 50)) {
+            auto *hint = new vgui::Label(vgui::MySize<double>(windowWidth - 2 * left, 20), glm::dvec2(left, y), fixedSize, inParent, glm::dvec2(0, 0), line);
+            hint->setFontSize(12);
+            hint->setTextColor(mutedColor);
+            settingsWindow->addChild(hint);
+            y += 19;
+        }
+    }
+
     y += 6;
     for (const std::wstring &line : wrapText(L"Рамки и блоки, налезшие друг на друга от крупных имён, расступаются сами. «Разложить заново» - "
                                              L"вся карта с нуля (Ctrl+Z - вернуть как было).", 50)) {
@@ -528,6 +554,19 @@ void App::saveLayout() {
     layout.cameraZoom = mapView.zoom;
     layout.hasCamera = true;
     layout.save((std::filesystem::path(project.dataDir) / "layout.txt").wstring());
+}
+
+
+// Открыть файл проекта (путь от корня) в IDE на строке
+void App::openInIde(const std::wstring &file, int line) {
+    if (project.root.empty())
+        return;
+    std::wstring error;
+    std::wstring fullPath = (std::filesystem::path(project.root) / file).lexically_normal().wstring();
+    if (IdeLauncher::openFile(settings().ideCommand, project.root, fullPath, line, error))
+        statusLabel->setText(L"Открыто в IDE: " + std::filesystem::path(file).filename().wstring() + L":" + std::to_wstring(line));
+    else
+        statusLabel->setText(error);
 }
 
 
@@ -973,6 +1012,17 @@ void App::rebuildDetails() {
     }
     y += 6;
     addParagraph(node.file + L":" + std::to_wstring(node.line), 12, mutedColor);
+    {
+        y += 4;
+        auto *ideButton = new vgui::Button(vgui::MySize<double>(150, 28), glm::dvec2(left, y), fixedSize, inParent, glm::dvec2(0, 0), L"Открыть в IDE");
+        ideButton->setFontSize(13);
+        ideButton->setToolTip(L"Qt Creator: уже открыт - файл откроется в нём, нет - запустится с проектом. Другая IDE - команда в настройках");
+        std::wstring file = node.file;
+        int line = node.line;
+        ideButton->eventManager().subscribe<vgui::Button::Click_Event>(this, [this, file, line](const vgui::Button::Click_Event &) {openInIde(file, line);});
+        detailsPanel->addChild(ideButton);
+        y += 34;
+    }
 
     // Комментарий - с полосой слева
     y += 12;
@@ -1023,7 +1073,9 @@ void App::openContextMenu(const MapView::ContextRequest &request) {
     if (request.note >= 0)
         items = {L"Изменить текст", L"Удалить пометку"};
     else if (request.node >= 0)
-        items = {L"Вид на блок", L"Скопировать имя", L"Скопировать файл:строку"};
+        items = {L"Открыть в IDE", L"Вид на блок", L"Скопировать имя", L"Скопировать файл:строку"};
+    else if (!request.file.empty())
+        items = {L"Открыть файл в IDE", L"Пометка здесь", L"Вся карта", L"Разложить заново"};
     else
         items = {L"Пометка здесь", L"Вся карта", L"Разложить заново"};
     double scale = windowSize.y / 1080.0;
@@ -1046,14 +1098,24 @@ void App::contextMenuChosen(int itemIndex) {
     } else if (target.node >= 0 && target.node < int(shownGraph.nodes.size())) {
         const GraphNode &node = shownGraph.nodes[target.node];
         if (itemIndex == 0) {
+            openInIde(node.file, node.line);
+        } else if (itemIndex == 1) {
             mapView.selectedNode = target.node;
             mapView.focusNode(target.node);
-        } else if (itemIndex == 1) {
+        } else if (itemIndex == 2) {
             SDL_SetClipboardText(wstringToString(node.qualifiedName).c_str());
         } else {
             SDL_SetClipboardText(wstringToString(node.file + L":" + std::to_wstring(node.line)).c_str());
         }
     } else {
+        // На рамке файла первый пункт - открыть файл, дальше - как на пустом месте
+        if (!target.file.empty()) {
+            if (itemIndex == 0) {
+                openInIde(target.file, 1);
+                return;
+            }
+            --itemIndex;
+        }
         if (itemIndex == 0) {
             mapView.selectedNote = mapView.addNote(target.worldPosition, L"Пометка");
             mapView.selectedNode = -1;

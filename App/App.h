@@ -19,6 +19,7 @@
 #include "History/History.h"
 #include "Canvas/MapView.h"
 #include "Settings/Settings.h"
+#include "Ide/IdeLauncher.h"
 #include "Global/Logging_Fmt.h"
 
 
@@ -106,6 +107,8 @@ private:
     void saveLayout();
     // Разложить карту заново (с отменой по Ctrl+Z)
     void relayoutMap();
+    // Открыть файл проекта (путь от корня) в IDE на строке
+    void openInIde(const std::wstring &file, int line);
 
     // Сканирование в потоке и его ход
     void startScan();

@@ -52,6 +52,7 @@ public:
         glm::dvec2 worldPosition{0, 0};
         int node = -1;
         int note = -1;
+        std::wstring file;             // Файл рамки под курсором (от корня проекта), пусто - не на рамке
     } contextRequest;
 
     // Шейдеры и шрифт

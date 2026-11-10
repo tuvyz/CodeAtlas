@@ -578,6 +578,11 @@ void MapView::handleEvent(const SDL_Event &event, bool isCursorOverGui) {
             contextRequest.worldPosition = world;
             contextRequest.node = hitNode(world);
             contextRequest.note = hitNote(world);
+            contextRequest.file.clear();
+            for (const FileFrame &frame : frames) {
+                if (frame.rect.contains(world))
+                    contextRequest.file = frame.file;
+            }
             return;
         }
         if (event.button.button != SDL_BUTTON_LEFT)

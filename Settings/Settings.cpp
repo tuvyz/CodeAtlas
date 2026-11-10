@@ -37,6 +37,13 @@ void Settings::load() {
         if (colonPos == std::string::npos)
             continue;
         std::string key = line.substr(0, colonPos);
+        if (key == "ide_command") {
+            std::string command = line.substr(colonPos + 1);
+            command.erase(0, command.find_first_not_of(" \t"));
+            command.erase(command.find_last_not_of(" \t\r") + 1);
+            ideCommand = stringToWString(command);
+            continue;
+        }
         double value = 0;
         std::istringstream valueStream(line.substr(colonPos + 1));
         valueStream.imbue(std::locale::classic());
@@ -78,6 +85,7 @@ bool Settings::save() const {
          << "wheel_zoom_step: " << wheelZoomStep << '\n'
          << "scan_threads: " << scanThreads << '\n'
          << "node_size_mode: " << nodeSizeMode << '\n'
-         << "lines_per_step: " << linesPerStep << '\n';
+         << "lines_per_step: " << linesPerStep << '\n'
+         << "ide_command: " << wstringToString(ideCommand) << '\n';
     return bool(file);
 }
