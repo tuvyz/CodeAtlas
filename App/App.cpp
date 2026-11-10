@@ -32,7 +32,7 @@ void applyLightTheme() {
     theme.buttonBackgroundHover = {240, 236, 228};
     theme.buttonBackgroundPressed = {225, 219, 208};
     theme.buttonText = inkColor;
-    theme.buttonTextHover = {28, 27, 25};
+    theme.buttonTextHover = accentColor;
     theme.buttonTextPressed = {95, 90, 82};
     theme.sliderLine = vgui::Pixel(214, 207, 196);
     theme.inputBackground = vgui::Pixel(255, 255, 255);
@@ -762,36 +762,86 @@ void App::rebuildDetails() {
         for (const std::wstring &line : wrapText(text, std::max(10, int(width / (fontSize * 0.6)))))
             addLabel(line, fontSize, color);
     };
-    auto addSection = [&](const std::wstring &title, size_t count) {
-        y += 12;
-        addLabel(title + L" - " + std::to_wstring(count), 12, mutedColor);
-        y += 2;
+    // Блок с фоном: строки текста на подложке, сверху и снизу запас
+    auto addBox = [&](const std::vector<std::wstring> &lines, int fontSize, glm::ivec3 textColor, vgui::Pixel background, double indent) {
+        constexpr double boxPadding = 7;
+        auto addRow = [&](const std::wstring &text, double height) {
+            auto *label = new vgui::Label(vgui::MySize<double>(width, height), glm::dvec2(left, y), fixedSize, inParent, glm::dvec2(0, 0), text);
+            label->setFontSize(fontSize);
+            label->setTextColor(textColor);
+            label->setBackgroundColor(background);
+            label->setTextIndent(int(indent));
+            detailsPanel->addChild(label);
+            y += height;
+        };
+        addRow(L"", boxPadding);
+        for (const std::wstring &line : lines)
+            addRow(line, fontSize * 1.45);
+        addRow(L"", boxPadding);
     };
-    // Кнопка узла; узел из другого файла с неоднозначным именем (main шейдера и т.п.) - с именем файла
-    auto addNodeButton = [&](int nodeIndex, const std::wstring &prefix) {
+    // Раздел связей: образец связи как на холсте, заголовок, число
+    auto addSection = [&](const char *legendImage, const std::wstring &title, size_t count) {
+        y += 18;
+        auto *sample = new vgui::Button(vgui::MySize<double>(36, 14), glm::dvec2(left, y + 4), fixedSize, inParent, glm::dvec2(0, 0), L"", true);
+        sample->setContextImage((resourceDir() / "Legend" / (std::string(legendImage) + ".png")).wstring());
+        detailsPanel->addChild(sample);
+        auto *label = new vgui::Label(vgui::MySize<double>(width - 46, 22), glm::dvec2(left + 46, y), fixedSize, inParent, glm::dvec2(0, 0),
+                                      title + L"  " + std::to_wstring(count));
+        label->setFontSize(14);
+        label->setTextColor(inkColor);
+        detailsPanel->addChild(label);
+        y += 28;
+    };
+    // Строка списка: подложка через строку, номер вызова отдельной колонкой, имя - кнопкой без рамки (наведение - синим);
+    // узел из другого файла с неоднозначным именем (main шейдера и т.п.) - с именем файла
+    int rowIndex = 0;
+    auto addNodeButton = [&](int nodeIndex, int order) {
         const GraphNode &node = shownGraph.nodes[nodeIndex];
+        constexpr double rowHeight = 26;
+        if (rowIndex++ % 2 == 0) {
+            auto *stripe = new vgui::Label(vgui::MySize<double>(width, rowHeight), glm::dvec2(left, y), fixedSize, inParent);
+            stripe->setBackgroundColor(vgui::Pixel(242, 238, 231));
+            detailsPanel->addChild(stripe);
+        }
+        double textLeft = 0;
+        if (order > 0) {
+            auto *number = new vgui::Label(vgui::MySize<double>(30, rowHeight), glm::dvec2(left, y), fixedSize, inParent, glm::dvec2(0, 0),
+                                           std::to_wstring(order));
+            number->setFontSize(12);
+            number->setTextColor(mutedColor);
+            number->setTextIndent(8);
+            detailsPanel->addChild(number);
+            textLeft = 26;
+        }
         bool isShader = node.id.rfind("glsl:", 0) == 0;
         bool isOtherFile = mapView.selectedNode >= 0 && shownGraph.nodes[mapView.selectedNode].file != node.file;
-        std::wstring fileSuffix = isShader && isOtherFile ? L" · " + std::filesystem::path(node.file).filename().wstring() : std::wstring();
-        auto *button = new vgui::Button(vgui::MySize<double>(width, 28), glm::dvec2(left, y), fixedSize, inParent, glm::dvec2(0, 0),
-                                        prefix + node.name + fileSuffix);
+        std::wstring fileSuffix = isShader && isOtherFile ? L"  · " + std::filesystem::path(node.file).filename().wstring() : std::wstring();
+        auto *button = new vgui::Button(vgui::MySize<double>(width - textLeft, rowHeight), glm::dvec2(left + textLeft, y), fixedSize, inParent,
+                                        glm::dvec2(0, 0), node.name + fileSuffix, true);
         button->setFontSize(13);
         button->setTextAlignedLeft(true);
         button->setToolTip(node.file + L":" + std::to_wstring(node.line));
         std::string id = node.id;
         button->eventManager().subscribe<vgui::Button::Click_Event>(this, [this, id](const vgui::Button::Click_Event &) {pendingSelectId = id;});
         detailsPanel->addChild(button);
-        y += 31;
+        y += rowHeight;
     };
-    auto addNodeList = [&](const std::wstring &title, const std::vector<int> &nodes) {
+    auto addNodeList = [&](const char *legendImage, const std::wstring &title, const std::vector<std::pair<int, int>> &nodes) {
         if (nodes.empty())
             return;
         constexpr size_t maxListed = 60;
-        addSection(title, nodes.size());
+        addSection(legendImage, title, nodes.size());
+        rowIndex = 0;
         for (size_t i = 0; i < nodes.size() && i < maxListed; ++i)
-            addNodeButton(nodes[i], L"");
+            addNodeButton(nodes[i].first, nodes[i].second);
         if (nodes.size() > maxListed)
             addLabel(L"и ещё " + std::to_wstring(nodes.size() - maxListed), 12, mutedColor);
+    };
+    auto unordered = [](const std::vector<int> &nodes) {
+        std::vector<std::pair<int, int>> result;
+        for (int nodeIndex : nodes)
+            result.push_back({nodeIndex, 0});
+        return result;
     };
 
     // Нет карты
@@ -893,22 +943,55 @@ void App::rebuildDetails() {
         else if (mapView.diffStates[nodeIndex] == DiffState::Changed)
             kindText += L" - изменена в снимке";
     }
-    addLabel(kindText, 12, kindColors[int(node.kind)]);
-    y += 2;
-    addParagraph(node.name, 19, inkColor);
-    if (node.qualifiedName != node.name)
-        addParagraph(node.qualifiedName, 12, mutedColor);
-    if (!node.signature.empty()) {
-        y += 4;
-        addParagraph(node.signature, 13, glm::ivec3(80, 76, 70));
+    // Шапка: вид плашкой, владелец (класс, пространство имён) мелко, само имя крупно
+    {
+        glm::ivec3 kindColor = kindColors[int(node.kind)];
+        double chipWidth = double(kindText.size()) * 12 * 0.6 + 18;
+        auto *chip = new vgui::Label(vgui::MySize<double>(chipWidth, 22), glm::dvec2(left, y), fixedSize, inParent, glm::dvec2(0, 0), kindText);
+        chip->setFontSize(12);
+        chip->setTextColor(kindColor);
+        chip->setTextIndent(9);
+        chip->setBackgroundColor(vgui::Pixel((kindColor.r + 255 * 7) / 8, (kindColor.g + 255 * 7) / 8, (kindColor.b + 255 * 7) / 8));
+        detailsPanel->addChild(chip);
+        y += 32;
     }
-    y += 4;
+    std::wstring shortName = node.name;
+    std::wstring owner;
+    size_t scopePosition = node.qualifiedName.rfind(L"::");
+    if (scopePosition != std::wstring::npos && node.qualifiedName.find(L'(') == std::wstring::npos) {
+        owner = node.qualifiedName.substr(0, scopePosition);
+        shortName = node.qualifiedName.substr(scopePosition + 2);
+    }
+    if (!owner.empty())
+        addParagraph(owner + L"::", 13, mutedColor);
+    addParagraph(shortName, 22, inkColor);
+
+    // Сигнатура - на подложке, как код; файл и строка - мелко под ней
+    if (!node.signature.empty()) {
+        y += 8;
+        addBox(wrapText(node.signature, std::max(10, int((width - 20) / (13 * 0.6)))), 13, glm::ivec3(70, 66, 60), vgui::Pixel(240, 236, 228), 10);
+    }
+    y += 6;
     addParagraph(node.file + L":" + std::to_wstring(node.line), 12, mutedColor);
-    y += 8;
-    if (node.comment.empty())
+
+    // Комментарий - с полосой слева
+    y += 12;
+    if (node.comment.empty()) {
         addLabel(L"Без комментария над объявлением", 13, glm::ivec3(165, 158, 147));
-    else
-        addParagraph(node.comment, 14, inkColor);
+    } else {
+        double commentTop = y;
+        std::vector<std::wstring> commentLines = wrapText(node.comment, std::max(10, int((width - 16) / (14 * 0.6))));
+        for (const std::wstring &line : commentLines) {
+            auto *label = new vgui::Label(vgui::MySize<double>(width - 14, 21), glm::dvec2(left + 14, y), fixedSize, inParent, glm::dvec2(0, 0), line);
+            label->setFontSize(14);
+            label->setTextColor(inkColor);
+            detailsPanel->addChild(label);
+            y += 21;
+        }
+        auto *bar = new vgui::Label(vgui::MySize<double>(3, y - commentTop), glm::dvec2(left, commentTop), fixedSize, inParent);
+        bar->setBackgroundColor(vgui::Pixel(accentColor.r, accentColor.g, accentColor.b));
+        detailsPanel->addChild(bar);
+    }
 
     // Вызовы по порядку; связи без порядка (из C++ к main шейдера) - отдельным списком
     MapView::NodeLinks links = mapView.linksOf(nodeIndex);
@@ -920,19 +1003,16 @@ void App::rebuildDetails() {
         else
             shaders.push_back(callee);
     }
-    addNodeList(L"Шейдеры", shaders);
-    if (!orderedCallees.empty()) {
-        constexpr size_t maxListed = 60;
-        addSection(L"Вызывает по порядку", orderedCallees.size());
-        for (size_t i = 0; i < orderedCallees.size() && i < maxListed; ++i)
-            addNodeButton(orderedCallees[i].first, std::to_wstring(orderedCallees[i].second) + L". ");
-        if (orderedCallees.size() > maxListed)
-            addLabel(L"и ещё " + std::to_wstring(orderedCallees.size() - maxListed), 12, mutedColor);
-    }
+    y += 4;
+    addNodeList("call", L"Шейдеры", unordered(shaders));
+    addNodeList("call", L"Вызывает по порядку", orderedCallees);
     bool isFunction = node.kind == NodeKind::Function;
-    addNodeList(L"Вызывают", links.callers);
-    addNodeList(isFunction ? L"Читает данные" : L"Читают", links.reads);
-    addNodeList(isFunction ? L"Пишет данные" : L"Пишут", links.writes);
+    addNodeList("call", L"Вызывают", unordered(links.callers));
+    addNodeList("read", isFunction ? L"Читает данные" : L"Читают", unordered(links.reads));
+    addNodeList("write", isFunction ? L"Пишет данные" : L"Пишут", unordered(links.writes));
+    y += 16;
+    auto *bottomGap = new vgui::Label(vgui::MySize<double>(width, 1), glm::dvec2(left, y), fixedSize, inParent);
+    detailsPanel->addChild(bottomGap);
 }
 
 
