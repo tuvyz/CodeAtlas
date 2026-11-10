@@ -13,7 +13,8 @@ name: VoxelGame
 # CMake пишет его при set(CMAKE_EXPORT_COMPILE_COMMANDS ON) с генератором Ninja или Makefile
 compile_commands: build
 
-# Папки от корня проекта, которые на карту не попадают (сторонние библиотеки и т.п.). Папка сборки не попадает и так
+# Папки от корня проекта, которые на карту не попадают. Сторонние библиотеки не попадают и так: папки Libs, third_party, external, vendor,
+# deps и т.п. и папки со своей лицензией (LICENSE, COPYING) или своим .git; папка сборки - тоже
 exclude: [Libs, Physics/Bullet3]
 
 # Вызовы, чьи явные шаблонные аргументы - компоненты: registry.view<A, B>(), get<A>(e), emplace<A>(e) и т.п.

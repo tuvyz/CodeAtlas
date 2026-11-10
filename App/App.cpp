@@ -866,8 +866,8 @@ void App::updateComparison() {
         if (addedCount + changedCount + removedCount == 0)
             statusLabel->setText(L"С " + shortHash + L" в коде ничего не менялось");
         else
-            statusLabel->setText(L"С " + shortHash + L": новых " + std::to_wstring(addedCount) + L", изменённых " + std::to_wstring(changedCount) +
-                                 L", удалённых " + std::to_wstring(removedCount));
+            statusLabel->setText(L"С " + shortHash + L": новых " + std::to_wstring(addedCount) + L", изм. " + std::to_wstring(changedCount) +
+                                 L", удал. " + std::to_wstring(removedCount));
 
         // Места призраков: строками под блоками своего файла в ширину рамки (прежние места могли занять новые блоки, а файл - переехать);
         // файла на карте больше нет - прежнее место узла, если было
@@ -1044,7 +1044,7 @@ void App::startNextJob() {
     case JobKind::CommitGraph:
         jobFilesTotal = 0;
         jobFilesRead = 0;
-        statusLabel->setText(L"Граф коммита " + stringToWString(jobCommit.substr(0, 7)) + L": отличия от рабочей папки…");
+        statusLabel->setText(L"Граф " + stringToWString(jobCommit.substr(0, 7)) + L": отличия от рабочей папки…");
         scanProgress->setValue(0, vgui::Pixel(47, 111, 223));
         scanProgress->setVisible(true);
         jobThread = std::thread([this, dataDir]() {
@@ -1134,7 +1134,7 @@ void App::pollJob() {
 
     // Граф коммита: сначала файлы той версии из git, потом разбор единиц с ними
     if (jobKind == JobKind::CommitGraph) {
-        std::wstring commitText = L"Граф коммита " + stringToWString(jobCommit.substr(0, 7));
+        std::wstring commitText = L"Граф " + stringToWString(jobCommit.substr(0, 7));
         int filesTotal = jobFilesTotal;
         int filesRead = jobFilesRead;
         if (total > 0) {
