@@ -42,20 +42,21 @@ struct LayoutRect {
 // раскладываются только новые блоки, места пропавших узлов остаются (узел вернётся на старое место, история рисует его призрак там же)
 class Layout {
 public:
-    // Размеры на холсте, единицы холста (при масштабе 1 - пиксели). Имя в блоке и пометки - из настроек программы, блоки - от них
+    // Размеры на холсте, единицы холста (при масштабе 1 - пиксели). Размеры имён - из настроек программы, полосы имён и блоки - от них
     static constexpr double nodeGapX = 18;            // Зазор между столбцами блоков в рамке файла
     static constexpr double nodeGapY = 10;            // Зазор между строками блоков
     static constexpr double framePadding = 12;        // Отступ блоков от края рамки файла
     static constexpr double frameGap = 28;            // Зазор между рамками файлов
     static constexpr double folderPadding = 22;       // Отступ рамок от края области папки
-    static constexpr double frameTitleSize = 40;      // Рамка файла не уже имени такой высоты (имя рисуется постоянного размера на экране)
-    static constexpr double frameHeaderHeight = 72;   // Полоса имени файла над блоками
-    static constexpr double folderHeaderHeight = 40;  // Полоса имени папки
     static constexpr int maxFolderDepth = 3;          // Папки глубже не рисуются областями: их файлы - в области папки этого уровня
     static double nodeTextSize() {return settings().nodeTextSize;}               // Высота шрифта имени в блоке
     static double nodeHeight() {return std::max(30.0, nodeTextSize() * 2.3);}    // Высота блока
     static double nodeCharWidth() {return nodeTextSize() * 0.6;}                 // Ширина знака имени (моноширинный шрифт, 0.6 высоты)
     static double noteTextSize() {return settings().noteTextSize;}               // Высота шрифта пометки
+    static double frameTitleSize() {return settings().fileTitleSize;}            // Высота шрифта имени файла
+    static double frameHeaderHeight() {return frameTitleSize() * 1.8;}           // Полоса имени файла над блоками
+    static double folderTitleSize() {return settings().folderTitleSize;}         // Высота шрифта имени папки верхнего уровня
+    static double folderHeaderHeight() {return folderTitleSize() * 1.8;}         // Полоса имени папки
 
     std::map<std::string, glm::dvec2> nodePositions; // Левый верхний угол блока по id узла
     std::vector<LayoutNote> notes;

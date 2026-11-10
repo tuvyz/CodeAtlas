@@ -44,10 +44,10 @@ void Settings::load() {
             continue;
 
         // Значение за пределами ползунка окна настроек обрезается
-        if (key == "file_label_size")
-            fileLabelSize = std::clamp(value, 10.0, 60.0);
-        else if (key == "folder_label_size")
-            folderLabelSize = std::clamp(value, 10.0, 60.0);
+        if (key == "file_title_size")
+            fileTitleSize = std::clamp(value, 12.0, 120.0);
+        else if (key == "folder_title_size")
+            folderTitleSize = std::clamp(value, 12.0, 80.0);
         else if (key == "node_text_size")
             nodeTextSize = std::clamp(value, 9.0, 32.0);
         else if (key == "note_text_size")
@@ -66,8 +66,8 @@ bool Settings::save() const {
     if (!file)
         return false;
     file.imbue(std::locale::classic());
-    file << "file_label_size: " << fileLabelSize << '\n'
-         << "folder_label_size: " << folderLabelSize << '\n'
+    file << "file_title_size: " << fileTitleSize << '\n'
+         << "folder_title_size: " << folderTitleSize << '\n'
          << "node_text_size: " << nodeTextSize << '\n'
          << "note_text_size: " << noteTextSize << '\n'
          << "edge_thickness: " << edgeThickness << '\n'
