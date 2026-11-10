@@ -870,25 +870,26 @@ void App::updateComparison() {
             glm::dvec2 cursor{0, 0};
             double height = 0;
         };
-        std::map<std::wstring, std::vector<int>> liveNodesOfFile = Layout::nodesByFile(shownGraph);
+        std::map<std::wstring, std::vector<int>> liveNodesOfFile = Layout::nodesByFrame(shownGraph);
         std::map<std::wstring, GhostRow> rows;
         for (int previousIndex : mapView.removedNodes) {
             const GraphNode &node = compared->nodes[previousIndex];
             glm::dvec2 size = Layout::nodeSize(node);
-            auto liveNodes = liveNodesOfFile.find(node.file);
+            std::wstring key = Layout::frameKey(node.file);
+            auto liveNodes = liveNodesOfFile.find(key);
             LayoutRect frame = liveNodes == liveNodesOfFile.end() ? LayoutRect() : layout.fileFrame(shownGraph, liveNodes->second);
             if (frame.size.x <= 0) {
                 auto found = layout.nodePositions.find(node.id);
                 mapView.ghostRects.push_back(found == layout.nodePositions.end() ? LayoutRect() : LayoutRect{found->second, size});
                 continue;
             }
-            auto row = rows.find(node.file);
+            auto row = rows.find(key);
             if (row == rows.end()) {
                 GhostRow first;
                 first.left = frame.position.x + Layout::framePadding;
                 first.right = frame.position.x + frame.size.x - Layout::framePadding;
                 first.cursor = glm::dvec2(first.left, frame.position.y + frame.size.y - Layout::framePadding + Layout::nodeGapY);
-                row = rows.emplace(node.file, first).first;
+                row = rows.emplace(key, first).first;
             }
             GhostRow &ghostRow = row->second;
             if (ghostRow.cursor.x > ghostRow.left && ghostRow.cursor.x + size.x > ghostRow.right) {

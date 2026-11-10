@@ -88,7 +88,7 @@ void MapView::rebuildGeometry() {
     }
 
     // Цвет по папке верхнего уровня (по алфавиту)
-    std::map<std::wstring, std::vector<int>> byFile = Layout::nodesByFile(*graph);
+    std::map<std::wstring, std::vector<int>> byFile = Layout::nodesByFrame(*graph);
     std::map<std::wstring, int> topFolderColors;
     auto topFolder = [](const std::wstring &file) {
         size_t slash = file.find(L'/');
@@ -105,7 +105,7 @@ void MapView::rebuildGeometry() {
     if (isDiffShown && !isDeadCodeShown && previousGraph != nullptr) {
         for (size_t ghostIndex = 0; ghostIndex < removedNodes.size() && ghostIndex < ghostRects.size(); ++ghostIndex) {
             if (ghostRects[ghostIndex].size.x > 0)
-                ghostsOfFile[previousGraph->nodes[removedNodes[ghostIndex]].file].push_back(ghostRects[ghostIndex]);
+                ghostsOfFile[Layout::frameKey(previousGraph->nodes[removedNodes[ghostIndex]].file)].push_back(ghostRects[ghostIndex]);
         }
     }
 
@@ -114,6 +114,16 @@ void MapView::rebuildGeometry() {
         frame.file = file;
         frame.nodes = nodes;
         frame.rect = layout->fileFrame(*graph, nodes);
+        frame.title = Layout::frameTitle(*graph, nodes);
+        frame.hasSeparator = layout->sectionSeparator(*graph, nodes, frame.separatorY);
+        for (int nodeIndex : nodes) {
+            const std::wstring &nodeFile = graph->nodes[nodeIndex].file;
+            bool isHeader = Layout::isHeaderFile(nodeFile);
+            if (frame.upperFile.empty() || (isHeader && !Layout::isHeaderFile(frame.upperFile)))
+                frame.upperFile = nodeFile;
+            if (frame.lowerFile.empty() || (!isHeader && Layout::isHeaderFile(frame.lowerFile)))
+                frame.lowerFile = nodeFile;
+        }
         frame.colorIndex = topFolderColors[topFolder(file)];
         auto ghosts = ghostsOfFile.find(file);
         for (size_t i = 0; frame.rect.size.x > 0 && ghosts != ghostsOfFile.end() && i < ghosts->second.size(); ++i) {
@@ -294,7 +304,7 @@ void MapView::buildScene() {
             if (!deadNodes[nodeIndex])
                 continue;
             isNodeChanged[nodeIndex] = 1;
-            fileChanges[graph->nodes[nodeIndex].file] = 3;
+            fileChanges[Layout::frameKey(graph->nodes[nodeIndex].file)] = 3;
         }
     } else if (isDiffShown) {
         for (int nodeIndex = 0; nodeIndex < int(graph->nodes.size()); ++nodeIndex) {
@@ -303,12 +313,12 @@ void MapView::buildScene() {
             if (state == DiffState::Same && !isUncommitted)
                 continue;
             isNodeChanged[nodeIndex] = 1;
-            int &fileChange = fileChanges[graph->nodes[nodeIndex].file];
+            int &fileChange = fileChanges[Layout::frameKey(graph->nodes[nodeIndex].file)];
             fileChange = std::max(fileChange, state == DiffState::Added ? 1 : 2);
         }
         for (size_t ghostIndex = 0; previousGraph != nullptr && ghostIndex < removedNodes.size() && ghostIndex < ghostRects.size(); ++ghostIndex) {
             if (ghostRects[ghostIndex].size.x > 0)
-                fileChanges[previousGraph->nodes[removedNodes[ghostIndex]].file] = 2;
+                fileChanges[Layout::frameKey(previousGraph->nodes[removedNodes[ghostIndex]].file)] = 2;
         }
     }
     bool isChangeFocus = !fileChanges.empty();
@@ -367,7 +377,15 @@ void MapView::buildScene() {
         glm::vec2 titlePosition = glm::vec2(frame.rect.position) + glm::vec2(Layout::framePadding, float(Layout::frameHeaderHeight() - 2) * 0.5f);
         glm::vec4 titleColor = glm::mix(color, glm::vec4(0, 0, 0, 1), 0.12f);
         titleColor.a *= isPale ? 0.35f : 1.0f;
-        font.addText(areaLayer, lastPathPart(frame.file), titlePosition, float(Layout::frameTitleSize()), titleColor);
+        font.addText(areaLayer, frame.title, titlePosition, float(Layout::frameTitleSize()), titleColor);
+
+        // Черта между блоками заголовка и исходника общей рамки
+        if (frame.hasSeparator) {
+            LayoutRect line{glm::dvec2(frame.rect.position.x + Layout::framePadding * 0.5, frame.separatorY - 1),
+                            glm::dvec2(frame.rect.size.x - Layout::framePadding, 2)};
+            glm::vec4 lineColor = glm::mix(hexColor(0xDCD5C9), color, isPale ? 0.15f : 0.5f);
+            areaLayer.shapes.push_back(boxShape(line, ShapeKind::RoundBox, 1, lineColor, glm::vec4(0), 0));
+        }
     }
 
     // Связи: выбранного (без выбора - под курсором), все - по галке «Все связи»
@@ -668,7 +686,7 @@ void MapView::handleEvent(const SDL_Event &event, bool isCursorOverGui) {
             contextRequest.file.clear();
             for (const FileFrame &frame : frames) {
                 if (frame.rect.contains(world))
-                    contextRequest.file = frame.file;
+                    contextRequest.file = frame.hasSeparator && world.y > frame.separatorY ? frame.lowerFile : frame.upperFile;
             }
             return;
         }

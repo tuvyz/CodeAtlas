@@ -87,16 +87,51 @@ bool Layout::save(const std::wstring &path) const {
 }
 
 
-// Узлы по файлам: путь файла от корня проекта - индексы узлов
-std::map<std::wstring, std::vector<int>> Layout::nodesByFile(const Graph &graph) {
+// Заголовок C/C++ (.h, .hpp, .inl и т.п.): в общей рамке его блоки над чертой
+bool Layout::isHeaderFile(const std::wstring &file) {
+    static const std::set<std::wstring> headerExtensions = {L".h", L".hh", L".hpp", L".hxx", L".inl", L".ipp", L".tpp"};
+    std::wstring extension = std::filesystem::path(file).extension().wstring();
+    std::transform(extension.begin(), extension.end(), extension.begin(), ::towlower);
+    return headerExtensions.count(extension) > 0;
+}
+
+// Ключ рамки файла: у заголовков и исходников C/C++ - путь без расширения, у остальных файлов - путь целиком
+std::wstring Layout::frameKey(const std::wstring &file) {
+    static const std::set<std::wstring> sourceExtensions = {L".c", L".cc", L".cpp", L".cxx", L".c++", L".m", L".mm"};
+    std::wstring extension = std::filesystem::path(file).extension().wstring();
+    std::transform(extension.begin(), extension.end(), extension.begin(), ::towlower);
+    if (!isHeaderFile(file) && sourceExtensions.count(extension) == 0)
+        return file;
+    return file.substr(0, file.size() - extension.size());
+}
+
+// Узлы по рамкам: заголовок и исходник с одним именем в одной папке (Foo.h и Foo.cpp) - одна рамка; ключ - frameKey
+std::map<std::wstring, std::vector<int>> Layout::nodesByFrame(const Graph &graph) {
     std::map<std::wstring, std::vector<int>> result;
     for (int nodeIndex = 0; nodeIndex < int(graph.nodes.size()); ++nodeIndex)
-        result[graph.nodes[nodeIndex].file].push_back(nodeIndex);
+        result[frameKey(graph.nodes[nodeIndex].file)].push_back(nodeIndex);
     return result;
 }
 
+// Имя рамки: имя файла, у пары - имя заголовка и расширение исходника («Renderer.h · .cpp»)
+std::wstring Layout::frameTitle(const Graph &graph, const std::vector<int> &nodes) {
+    std::set<std::wstring> headers, others;
+    for (int nodeIndex : nodes) {
+        const std::wstring &file = graph.nodes[nodeIndex].file;
+        (isHeaderFile(file) ? headers : others).insert(file);
+    }
+    std::vector<std::wstring> files(headers.begin(), headers.end());
+    files.insert(files.end(), others.begin(), others.end());
+    if (files.empty())
+        return std::wstring();
+    std::wstring title = std::filesystem::path(files[0]).filename().wstring();
+    for (size_t i = 1; i < files.size(); ++i)
+        title += L" · " + std::filesystem::path(files[i]).extension().wstring();
+    return title;
+}
 
-// Рамка файла: блоки узлов файла с отступами и полосой имени; пусто - у файла нет блоков с местом
+
+// Рамка файла (у пары заголовок и исходник - общая): блоки узлов с отступами и полосой имени; пусто - нет блоков с местом
 LayoutRect Layout::fileFrame(const Graph &graph, const std::vector<int> &fileNodes) const {
     glm::dvec2 minimum(1e300), maximum(-1e300);
     bool hasNodes = false;
@@ -113,18 +148,39 @@ LayoutRect Layout::fileFrame(const Graph &graph, const std::vector<int> &fileNod
     LayoutRect rect;
     rect.position = minimum - glm::dvec2(framePadding, framePadding + frameHeaderHeight());
     rect.size = maximum - minimum + glm::dvec2(2 * framePadding, 2 * framePadding + frameHeaderHeight());
-    rect.size.x = std::max(rect.size.x, frameTitleWidth(graph.nodes[fileNodes.front()].file));
+    rect.size.x = std::max(rect.size.x, frameTitleWidth(frameTitle(graph, fileNodes)));
     return rect;
 }
 
 
-// Наименьшая ширина рамки файла: имя файла целиком (моноширинный шрифт, знак - 0.6 высоты)
-double Layout::frameTitleWidth(const std::wstring &file) {
-    size_t slash = file.rfind(L'/');
-    size_t nameLength = slash == std::wstring::npos ? file.size() : file.size() - slash - 1;
-    return double(nameLength) * frameTitleSize() * 0.6 + 2 * framePadding + 6;
+// Разделительная черта общей рамки: высота посередине между блоками заголовка и исходника; false - в рамке один файл
+bool Layout::sectionSeparator(const Graph &graph, const std::vector<int> &nodes, double &separatorY) const {
+    double headerBottom = -1e300;
+    double sourceTop = 1e300;
+    bool hasHeader = false, hasSource = false;
+    for (int nodeIndex : nodes) {
+        auto found = nodePositions.find(graph.nodes[nodeIndex].id);
+        if (found == nodePositions.end())
+            continue;
+        if (isHeaderFile(graph.nodes[nodeIndex].file)) {
+            headerBottom = std::max(headerBottom, found->second.y + nodeSize(graph.nodes[nodeIndex]).y);
+            hasHeader = true;
+        } else {
+            sourceTop = std::min(sourceTop, found->second.y);
+            hasSource = true;
+        }
+    }
+    if (!hasHeader || !hasSource)
+        return false;
+    separatorY = (headerBottom + sourceTop) * 0.5;
+    return true;
 }
 
+
+// Наименьшая ширина рамки: имя рамки целиком (моноширинный шрифт, знак - 0.6 высоты)
+double Layout::frameTitleWidth(const std::wstring &title) {
+    return double(title.size()) * frameTitleSize() * 0.6 + 2 * framePadding + 6;
+}
 
 // Высота имени папки глубины depth (1 - верхний уровень, вложенные мельче)
 double Layout::folderTitleSizeAt(int depth) {
@@ -157,7 +213,8 @@ LayoutRect Layout::folderArea(const std::vector<LayoutRect> &children, const std
 }
 
 // Сетка файла: места блоков от левого верхнего угла рамки и размер рамки. Блоки разного размера идут полками слева направо
-// (типы сверху, дальше по строкам определения), ширина полки - под рамку примерно вдвое шире высоты
+// (типы сверху, дальше по строкам определения), ширина полки - под рамку примерно вдвое шире высоты. У пары - блоки заголовка,
+// под ними через sectionGap блоки исходника
 std::vector<std::pair<int, glm::dvec2>> Layout::fileGrid(const Graph &graph, std::vector<int> nodes, glm::dvec2 &frameSize) {
     std::sort(nodes.begin(), nodes.end(), [&](int first, int second) {
         bool isFirstType = graph.nodes[first].kind != NodeKind::Function;
@@ -166,35 +223,47 @@ std::vector<std::pair<int, glm::dvec2>> Layout::fileGrid(const Graph &graph, std
             return isFirstType;
         return graph.nodes[first].line < graph.nodes[second].line;
     });
-    double area = 0;
-    double widest = 0;
-    for (int nodeIndex : nodes) {
-        glm::dvec2 size = nodeSize(graph.nodes[nodeIndex]);
-        area += (size.x + nodeGapX) * (size.y + nodeGapY);
-        widest = std::max(widest, size.x);
-    }
-    double shelfWidth = std::max(widest, std::sqrt(area * 2));
+    std::vector<int> headerNodes, sourceNodes;
+    for (int nodeIndex : nodes)
+        (isHeaderFile(graph.nodes[nodeIndex].file) ? headerNodes : sourceNodes).push_back(nodeIndex);
 
+    // Полки одной части от высоты top: места, ширина и высота части
     std::vector<std::pair<int, glm::dvec2>> places;
-    glm::dvec2 cursor(0, 0);
-    double rowHeight = 0;
     double contentWidth = 0;
-    for (int nodeIndex : nodes) {
-        glm::dvec2 size = nodeSize(graph.nodes[nodeIndex]);
-        if (cursor.x > 0 && cursor.x + size.x > shelfWidth) {
-            cursor.x = 0;
-            cursor.y += rowHeight + nodeGapY;
-            rowHeight = 0;
+    auto placePart = [&](const std::vector<int> &partNodes, double top) {
+        double area = 0;
+        double widest = 0;
+        for (int nodeIndex : partNodes) {
+            glm::dvec2 size = nodeSize(graph.nodes[nodeIndex]);
+            area += (size.x + nodeGapX) * (size.y + nodeGapY);
+            widest = std::max(widest, size.x);
         }
-        places.push_back({nodeIndex, glm::dvec2(framePadding, frameHeaderHeight() + framePadding) + cursor});
-        cursor.x += size.x + nodeGapX;
-        rowHeight = std::max(rowHeight, size.y);
-        contentWidth = std::max(contentWidth, cursor.x - nodeGapX);
-    }
+        double shelfWidth = std::max(widest, std::sqrt(area * 2));
+        glm::dvec2 cursor(0, 0);
+        double rowHeight = 0;
+        for (int nodeIndex : partNodes) {
+            glm::dvec2 size = nodeSize(graph.nodes[nodeIndex]);
+            if (cursor.x > 0 && cursor.x + size.x > shelfWidth) {
+                cursor.x = 0;
+                cursor.y += rowHeight + nodeGapY;
+                rowHeight = 0;
+            }
+            places.push_back({nodeIndex, glm::dvec2(framePadding, frameHeaderHeight() + framePadding + top) + cursor});
+            cursor.x += size.x + nodeGapX;
+            rowHeight = std::max(rowHeight, size.y);
+            contentWidth = std::max(contentWidth, cursor.x - nodeGapX);
+        }
+        return cursor.y + rowHeight;
+    };
+    double height = placePart(headerNodes, 0);
+    if (!headerNodes.empty() && !sourceNodes.empty())
+        height += sectionGap;
+    height += placePart(sourceNodes, height);
+
     frameSize.x = contentWidth + 2 * framePadding;
     if (!nodes.empty())
-        frameSize.x = std::max(frameSize.x, frameTitleWidth(graph.nodes[nodes.front()].file));
-    frameSize.y = cursor.y + rowHeight + 2 * framePadding + frameHeaderHeight();
+        frameSize.x = std::max(frameSize.x, frameTitleWidth(frameTitle(graph, nodes)));
+    frameSize.y = height + 2 * framePadding + frameHeaderHeight();
     return places;
 }
 
@@ -311,7 +380,7 @@ glm::dvec2 Layout::packFiles(const Graph &graph, const std::map<std::wstring, st
 
 // Полная раскладка: папки областями, файлы рамками, блоки сеткой по строкам файла
 void Layout::relayout(const Graph &graph) {
-    std::map<std::wstring, std::vector<int>> byFile = nodesByFile(graph);
+    std::map<std::wstring, std::vector<int>> byFile = nodesByFrame(graph);
     std::vector<std::wstring> files;
     for (const auto &[file, nodes] : byFile)
         files.push_back(file);
@@ -341,7 +410,7 @@ int Layout::placeNewNodes(const Graph &graph) {
         return unplacedCount;
     }
 
-    std::map<std::wstring, std::vector<int>> byFile = nodesByFile(graph);
+    std::map<std::wstring, std::vector<int>> byFile = nodesByFrame(graph);
     std::map<std::wstring, LayoutRect> frames;            // Рамки файлов с местами
     std::vector<std::pair<std::wstring, std::vector<int>>> newFiles;
     for (const auto &[file, nodes] : byFile) {
@@ -353,25 +422,52 @@ int Layout::placeNewNodes(const Graph &graph) {
             continue;
         }
 
-        // Новые блоки файла - строками под его блоками, в ширину рамки
+        // Новые блоки - строками в ширину рамки под блоками своей части (заголовка или исходника); у новой части пары -
+        // заголовок над исходником, исходник под заголовком через sectionGap
         if (!unplaced.empty()) {
             LayoutRect frame = fileFrame(graph, placed);
             double columnWidth = 0;
             for (int nodeIndex : nodes)
                 columnWidth = std::max(columnWidth, nodeSize(graph.nodes[nodeIndex]).x);
             int columns = std::max(1, int((frame.size.x - 2 * framePadding + nodeGapX) / (columnWidth + nodeGapX)));
-            glm::dvec2 start(frame.position.x + framePadding, frame.position.y + frame.size.y - framePadding + nodeGapY);
             std::sort(unplaced.begin(), unplaced.end(), [&](int first, int second) {return graph.nodes[first].line < graph.nodes[second].line;});
-            // Строка новых блоков высотой по самому высокому из них
-            double rowTop = 0;
-            double rowHeight = 0;
-            for (int i = 0; i < int(unplaced.size()); ++i) {
-                if (i > 0 && i % columns == 0) {
-                    rowTop += rowHeight + nodeGapY;
-                    rowHeight = 0;
+            for (bool isHeaderPart : {true, false}) {
+                std::vector<int> partNodes;
+                for (int nodeIndex : unplaced) {
+                    if (isHeaderFile(graph.nodes[nodeIndex].file) == isHeaderPart)
+                        partNodes.push_back(nodeIndex);
                 }
-                nodePositions[graph.nodes[unplaced[i]].id] = start + glm::dvec2((i % columns) * (columnWidth + nodeGapX), rowTop);
-                rowHeight = std::max(rowHeight, nodeSize(graph.nodes[unplaced[i]]).y);
+                if (partNodes.empty())
+                    continue;
+                std::vector<int> samePart, otherPart;
+                for (int nodeIndex : placed)
+                    (isHeaderFile(graph.nodes[nodeIndex].file) == isHeaderPart ? samePart : otherPart).push_back(nodeIndex);
+
+                // Строки новых блоков высотой по самому высокому из них - от начала части
+                std::vector<glm::dvec2> offsets;
+                double rowTop = 0;
+                double rowHeight = 0;
+                for (int i = 0; i < int(partNodes.size()); ++i) {
+                    if (i > 0 && i % columns == 0) {
+                        rowTop += rowHeight + nodeGapY;
+                        rowHeight = 0;
+                    }
+                    offsets.push_back(glm::dvec2((i % columns) * (columnWidth + nodeGapX), rowTop));
+                    rowHeight = std::max(rowHeight, nodeSize(graph.nodes[partNodes[i]]).y);
+                }
+                double partHeight = rowTop + rowHeight;
+                LayoutRect sameRect = fileFrame(graph, samePart);
+                LayoutRect otherRect = fileFrame(graph, otherPart);
+                double left = frame.position.x + framePadding;
+                glm::dvec2 start;
+                if (sameRect.size.x > 0)
+                    start = glm::dvec2(left, sameRect.position.y + sameRect.size.y - framePadding + nodeGapY);
+                else if (isHeaderPart)
+                    start = glm::dvec2(left, otherRect.position.y + frameHeaderHeight() + framePadding - sectionGap - partHeight);
+                else
+                    start = glm::dvec2(left, otherRect.position.y + otherRect.size.y - framePadding + sectionGap);
+                for (int i = 0; i < int(partNodes.size()); ++i)
+                    nodePositions[graph.nodes[partNodes[i]].id] = start + offsets[i];
             }
         }
         frames[file] = fileFrame(graph, nodes);
@@ -527,12 +623,49 @@ int Layout::separateItems(std::vector<SeparationItem> &items, glm::dvec2 gap) {
 }
 
 
+// Блоки исходника в общей рамке - под блоками заголовка через sectionGap (налезшие, ушедшие вниз или вбок - сдвигаются); возвращает число сдвинутых рамок
+int Layout::stackSections(const Graph &graph, const std::map<std::wstring, std::vector<int>> &byFrame) {
+    int movedCount = 0;
+    for (const auto &[key, nodes] : byFrame) {
+        glm::dvec2 headerMinimum(1e300), headerMaximum(-1e300), sourceMinimum(1e300), sourceMaximum(-1e300);
+        std::vector<std::map<std::string, glm::dvec2>::iterator> sourcePositions;
+        for (int nodeIndex : nodes) {
+            auto found = nodePositions.find(graph.nodes[nodeIndex].id);
+            if (found == nodePositions.end())
+                continue;
+            glm::dvec2 size = nodeSize(graph.nodes[nodeIndex]);
+            if (isHeaderFile(graph.nodes[nodeIndex].file)) {
+                headerMinimum = glm::min(headerMinimum, found->second);
+                headerMaximum = glm::max(headerMaximum, found->second + size);
+            } else {
+                sourceMinimum = glm::min(sourceMinimum, found->second);
+                sourceMaximum = glm::max(sourceMaximum, found->second + size);
+                sourcePositions.push_back(found);
+            }
+        }
+        if (headerMinimum.x > headerMaximum.x || sourcePositions.empty())
+            continue;
+
+        // Исходник - ровно под заголовком; вбок не трогается, пока части стоят друг под другом
+        glm::dvec2 shift(0, headerMaximum.y + sectionGap - sourceMinimum.y);
+        if (sourceMaximum.x < headerMinimum.x || sourceMinimum.x > headerMaximum.x)
+            shift.x = headerMinimum.x - sourceMinimum.x;
+        if (std::abs(shift.x) < 1e-6 && std::abs(shift.y) < 1e-6)
+            continue;
+        for (auto &position : sourcePositions)
+            position->second += shift;
+        ++movedCount;
+    }
+    return movedCount;
+}
+
+
 // Раздвинуть наложения с зазором: блоки в рамке файла, рамки файлов и области подпапок в своей папке, от глубоких папок к корню.
 // Закреплённые узлы (перетаскиваемые) стоят, их блок, рамка и папки отталкивают соседей в ближнюю сторону; остальное
 // сдвигается вправо или вниз по порядку сверху вниз, слева направо. Возвращает число сдвинутых блоков, рамок и областей
 int Layout::separate(const Graph &graph, const std::set<std::string> &pinnedIds) {
-    std::map<std::wstring, std::vector<int>> byFile = nodesByFile(graph);
-    int movedCount = 0;
+    std::map<std::wstring, std::vector<int>> byFile = nodesByFrame(graph);
+    int movedCount = stackSections(graph, byFile);
     auto moveItems = [&](const std::vector<SeparationItem> &items) {
         for (const SeparationItem &item : items) {
             if (item.shift == glm::dvec2(0, 0))
@@ -554,7 +687,7 @@ int Layout::separate(const Graph &graph, const std::set<std::string> &pinnedIds)
         return false;
     };
 
-    // Блоки в рамке каждого файла
+    // Блоки в рамке каждого файла; заголовок, раздвинувшийся вниз, опускает под собой исходник
     for (const auto &[file, nodes] : byFile) {
         std::vector<SeparationItem> items;
         for (int nodeIndex : nodes) {
@@ -565,6 +698,7 @@ int Layout::separate(const Graph &graph, const std::set<std::string> &pinnedIds)
         movedCount += separateItems(items, glm::dvec2(nodeGapX, nodeGapY));
         moveItems(items);
     }
+    movedCount += stackSections(graph, byFile);
 
     // Папки областей (как на холсте - не глубже maxFolderDepth) с их файлами и подпапками; корень - пустой путь
     auto parentOf = [](const std::wstring &path) {

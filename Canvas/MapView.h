@@ -57,7 +57,7 @@ public:
         glm::dvec2 worldPosition{0, 0};
         int node = -1;
         int note = -1;
-        std::wstring file;             // Файл рамки под курсором (от корня проекта), пусто - не на рамке
+        std::wstring file;             // Файл рамки под курсором (от корня проекта; у общей рамки - заголовок над чертой, исходник под ней), пусто - не на рамке
     } contextRequest;
 
     // Шейдеры и шрифт
@@ -126,7 +126,12 @@ private:
 
     // Рамка файла и область папки, посчитанные из мест блоков
     struct FileFrame {
-        std::wstring file;
+        std::wstring file;            // Ключ рамки (Layout::frameKey): у пары заголовок и исходник - путь без расширения
+        std::wstring title;           // Имя рамки
+        std::wstring upperFile;       // Файл над чертой (заголовок) и под ней (исходник); один файл - оба он
+        std::wstring lowerFile;
+        bool hasSeparator = false;    // Пара: черта между блоками заголовка и исходника
+        double separatorY = 0;        // Высота черты, единицы холста
         LayoutRect rect;
         std::vector<int> nodes;
         int colorIndex = 0;

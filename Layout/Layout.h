@@ -6,6 +6,7 @@
 #include <map>
 #include <set>
 #include <cmath>
+#include <cwctype>
 #include <algorithm>
 #include <fstream>
 #include <iomanip>
@@ -47,6 +48,7 @@ public:
     static constexpr double nodeGapY = 10;            // Зазор между строками блоков
     static constexpr double framePadding = 12;        // Отступ блоков от края рамки файла
     static constexpr double frameGap = 28;            // Зазор между рамками файлов
+    static constexpr double sectionGap = 26;          // Зазор между блоками заголовка и исходника в общей рамке (посередине - черта)
     static constexpr double folderPadding = 22;       // Отступ рамок от края области папки
     static constexpr int maxFolderDepth = 3;          // Папки глубже не рисуются областями: их файлы - в области папки этого уровня
     static double nodeTextSize() {return settings().nodeTextSize;}               // Высота шрифта имени в блоке
@@ -74,8 +76,10 @@ public:
     bool load(const std::wstring &path);
     bool save(const std::wstring &path) const;
 
-    // Рамка файла: блоки узлов файла с отступами и полосой имени; пусто - у файла нет блоков с местом
+    // Рамка файла (у пары заголовок и исходник - общая): блоки узлов с отступами и полосой имени; пусто - нет блоков с местом
     LayoutRect fileFrame(const Graph &graph, const std::vector<int> &fileNodes) const;
+    // Разделительная черта общей рамки: высота посередине между блоками заголовка и исходника; false - в рамке один файл
+    bool sectionSeparator(const Graph &graph, const std::vector<int> &nodes, double &separatorY) const;
 
     // Места для узлов без места: в рамке своего файла под блоками, новый файл - рядом с файлами своей папки на свободном месте,
     // новая папка целиком - упаковкой полной раскладки одним блоком; ни одного места нет - полная раскладка. Возвращает число разложенных узлов
@@ -89,11 +93,16 @@ public:
     // сдвигается вправо или вниз по порядку сверху вниз, слева направо. Возвращает число сдвинутых блоков, рамок и областей
     int separate(const Graph &graph, const std::set<std::string> &pinnedIds = {});
 
-    // Узлы по файлам: путь файла от корня проекта - индексы узлов
-    static std::map<std::wstring, std::vector<int>> nodesByFile(const Graph &graph);
-
-    // Наименьшая ширина рамки файла: имя файла целиком (моноширинный шрифт, знак - 0.6 высоты)
-    static double frameTitleWidth(const std::wstring &file);
+    // Узлы по рамкам: заголовок и исходник с одним именем в одной папке (Foo.h и Foo.cpp) - одна рамка; ключ - frameKey
+    static std::map<std::wstring, std::vector<int>> nodesByFrame(const Graph &graph);
+    // Ключ рамки файла: у заголовков и исходников C/C++ - путь без расширения, у остальных файлов - путь целиком
+    static std::wstring frameKey(const std::wstring &file);
+    // Заголовок C/C++ (.h, .hpp, .inl и т.п.): в общей рамке его блоки над чертой
+    static bool isHeaderFile(const std::wstring &file);
+    // Имя рамки: имя файла, у пары - имя заголовка и расширение исходника («Renderer.h · .cpp»)
+    static std::wstring frameTitle(const Graph &graph, const std::vector<int> &nodes);
+    // Наименьшая ширина рамки: имя рамки целиком (моноширинный шрифт, знак - 0.6 высоты)
+    static double frameTitleWidth(const std::wstring &title);
     // Высота имени папки глубины depth (1 - верхний уровень, вложенные мельче)
     static double folderTitleSizeAt(int depth);
     // Размер имени папки глубины depth (последняя часть пути): ширина по знакам моноширинного шрифта, высота - с выносными элементами
@@ -113,6 +122,8 @@ private:
     };
     // Раздвинуть набор соседей с зазором gap (по x и y): закреплённые ставятся первыми, остальные по порядку чтения
     static int separateItems(std::vector<SeparationItem> &items, glm::dvec2 gap);
+    // Блоки исходника в общей рамке - под блоками заголовка через sectionGap (налезшие, ушедшие вниз или вбок - сдвигаются); возвращает число сдвинутых рамок
+    int stackSections(const Graph &graph, const std::map<std::wstring, std::vector<int>> &byFrame);
 
     // Упаковка файлов полками по папкам, как в полной раскладке: левые верхние углы рамок от начала упаковки, возвращает её размер.
     // Папки считаются от base: её файлы и подпапки - без её полосы имени и отступа, подпапки - областями с полосой и отступом
@@ -123,7 +134,8 @@ private:
     // Размер рамки файла с сеткой из всех его блоков
     static glm::dvec2 fileGridFrameSize(const Graph &graph, const std::vector<int> &nodes);
     // Сетка файла: места блоков от левого верхнего угла рамки и размер рамки. Блоки разного размера идут полками слева направо
-    // (типы сверху, дальше по строкам определения), ширина полки - под рамку примерно вдвое шире высоты
+    // (типы сверху, дальше по строкам определения), ширина полки - под рамку примерно вдвое шире высоты. У пары - блоки заголовка,
+    // под ними через sectionGap блоки исходника
     static std::vector<std::pair<int, glm::dvec2>> fileGrid(const Graph &graph, std::vector<int> nodes, glm::dvec2 &frameSize);
 };
 
