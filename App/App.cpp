@@ -351,21 +351,7 @@ void App::openProject(const std::wstring &root) {
     Debug() << "CodeAtlas: открытие проекта" << wstringToString(root);
     bool hasTemplate = project.load(root);
 
-    // Данные старых версий (папка .codeatlas в проекте) - в папку данных у CodeAtlas, из проекта убираются
-    std::filesystem::path oldFolder = std::filesystem::path(project.root) / ".codeatlas";
-    std::filesystem::path dataFolder(project.dataDir);
-    if (std::filesystem::is_directory(oldFolder, errorCode)) {
-        if (!std::filesystem::exists(dataFolder / "layout.txt", errorCode) && std::filesystem::exists(oldFolder / "layout.txt", errorCode))
-            std::filesystem::copy_file(oldFolder / "layout.txt", dataFolder / "layout.txt", errorCode);
-        if (!std::filesystem::exists(dataFolder / "history", errorCode) && std::filesystem::exists(oldFolder / "history", errorCode))
-            std::filesystem::copy(oldFolder / "history", dataFolder / "history", std::filesystem::copy_options::recursive, errorCode);
-        for (const char *name : {"layout.txt", "graph.txt", "compile_commands.json", ".gitignore"})
-            std::filesystem::remove(oldFolder / name, errorCode);
-        std::filesystem::remove_all(oldFolder / "history", errorCode);
-        std::filesystem::remove(oldFolder, errorCode);
-        Debug() << "CodeAtlas: данные из" << oldFolder.string() << "перенесены в" << dataFolder.string();
-    }
-    layout.load((dataFolder / "layout.txt").wstring());
+    layout.load((std::filesystem::path(project.dataDir) / "layout.txt").wstring());
     bool hasSavedCamera = layout.hasCamera;
     glm::dvec2 savedCameraCenter = layout.cameraCenter;
     double savedCameraZoom = layout.cameraZoom;
