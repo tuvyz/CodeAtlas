@@ -89,10 +89,91 @@ bool IdeLauncher::isProcessRunning(const std::wstring &executableName) {
 }
 
 
+// Имена проекта, какими его показывает Qt Creator: имя из project() в CMakeLists.txt, имя .pro, имя папки
+std::vector<std::wstring> IdeLauncher::projectNames(const std::wstring &projectRoot) {
+    std::vector<std::wstring> names;
+    std::ifstream cmakeFile(std::filesystem::path(projectRoot) / "CMakeLists.txt", std::ios::binary);
+    std::stringstream cmakeText;
+    cmakeText << cmakeFile.rdbuf();
+    std::string text = cmakeText.str();
+    std::smatch match;
+    if (std::regex_search(text, match, std::regex(R"(project\s*\(\s*([A-Za-z0-9_.\-]+))", std::regex::icase)))
+        names.push_back(stringToWString(match[1].str()));
+    std::error_code errorCode;
+    for (const auto &entry : std::filesystem::directory_iterator(projectRoot, errorCode)) {
+        if (entry.path().extension() == ".pro")
+            names.push_back(entry.path().stem().wstring());
+    }
+    names.push_back(std::filesystem::path(projectRoot).filename().wstring());
+    return names;
+}
+
+
+// Процесс Qt Creator, в заголовке окна которого открыт файл проекта с одним из этих имён («файл @ имя» или «(папка @ имя)»); 0 - нет
+unsigned long IdeLauncher::findQtCreatorWithProject(const std::wstring &executableName, const std::vector<std::wstring> &names) {
+#ifdef _WIN32
+    // Процессы Qt Creator
+    struct Search {
+        std::set<DWORD> processIds;
+        std::vector<std::wstring> names;
+        DWORD foundProcessId = 0;
+    } search;
+    search.names = names;
+    std::wstring wanted = executableName;
+    for (wchar_t &character : wanted)
+        character = wchar_t(std::towlower(character));
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE)
+        return 0;
+    PROCESSENTRY32W entry = {};
+    entry.dwSize = sizeof(entry);
+    for (BOOL hasEntry = Process32FirstW(snapshot, &entry); hasEntry; hasEntry = Process32NextW(snapshot, &entry)) {
+        std::wstring name = entry.szExeFile;
+        for (wchar_t &character : name)
+            character = wchar_t(std::towlower(character));
+        if (name == wanted)
+            search.processIds.insert(entry.th32ProcessID);
+    }
+    CloseHandle(snapshot);
+    if (search.processIds.empty())
+        return 0;
+
+    // Их видимые окна: заголовок с «@ имя», за которым не продолжение имени
+    EnumWindows([](HWND window, LPARAM data) -> BOOL {
+        Search *search = reinterpret_cast<Search*>(data);
+        DWORD processId = 0;
+        GetWindowThreadProcessId(window, &processId);
+        if (!IsWindowVisible(window) || search->processIds.count(processId) == 0)
+            return TRUE;
+        wchar_t title[512] = {};
+        GetWindowTextW(window, title, 512);
+        std::wstring titleText = title;
+        for (const std::wstring &name : search->names) {
+            std::wstring marker = L"@ " + name;
+            size_t position = titleText.find(marker);
+            if (position == std::wstring::npos)
+                continue;
+            size_t after = position + marker.size();
+            if (after == titleText.size() || !(std::iswalnum(titleText[after]) || titleText[after] == L'_')) {
+                search->foundProcessId = processId;
+                return FALSE;
+            }
+        }
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(&search));
+    return search.foundProcessId;
+#else
+    return 0;
+#endif
+}
+
+
 // Запустить команду отдельным процессом, не дожидаясь
 bool IdeLauncher::launch(const std::wstring &commandLine) {
     Debug() << "IDE:" << wstringToString(commandLine);
 #ifdef _WIN32
+    // Запущенная программа может вынести своё окно вперёд (иначе Windows только мигает кнопкой на панели задач)
+    AllowSetForegroundWindow(ASFW_ANY);
     std::wstring mutableCommand = commandLine;
     STARTUPINFOW startup = {};
     startup.cb = sizeof(startup);
@@ -157,15 +238,26 @@ bool IdeLauncher::openFile(const std::wstring &commandTemplate, const std::wstri
         return true;
     }
 
-    // Qt Creator: запущен - только файл в открытый (иначе он подсвечивает «проект уже открыт»), нет - с проектом
+    // Qt Creator: тот запущенный, где открыт этот проект, - только файл (путь проекта он подсвечивает «проект уже открыт»);
+    // такого нет - новый Qt Creator с проектом и файлом, даже если открыт другой с чужим проектом
     std::filesystem::path qtCreator = findQtCreator();
     if (qtCreator.empty()) {
         error = L"Qt Creator не найден - указать команду IDE в настройках";
         return false;
     }
-    std::wstring command = L"\"" + qtCreator.make_preferred().wstring() + L"\" -client ";
-    if (!isProcessRunning(qtCreator.filename().wstring()) && !projectPath.empty())
+    std::wstring command = L"\"" + qtCreator.make_preferred().wstring() + L"\" ";
+    unsigned long processId = findQtCreatorWithProject(qtCreator.filename().wstring(), projectNames(projectRoot));
+#ifdef _WIN32
+    if (processId != 0)
+        command += L"-pid " + std::to_wstring(processId) + L" ";
+    else if (!projectPath.empty())
         command += L"\"" + projectPath + L"\" ";
+#else
+    // Без перебора окон: запущен - в него, нет - с проектом
+    command += L"-client ";
+    if (processId == 0 && !isProcessRunning(qtCreator.filename().wstring()) && !projectPath.empty())
+        command += L"\"" + projectPath + L"\" ";
+#endif
     command += L"\"" + filePath + L":" + lineText + L"\"";
     if (!launch(command)) {
         error = L"Qt Creator не запустился: " + qtCreator.wstring();
