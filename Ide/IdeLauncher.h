@@ -43,7 +43,7 @@ private:
     static bool isProcessRunning(const std::wstring &executableName);
     // Имена проекта, какими его показывает Qt Creator: имя из project() в CMakeLists.txt, имя .pro, имя папки
     static std::vector<std::wstring> projectNames(const std::wstring &projectRoot);
-    // Процесс Qt Creator, в заголовке окна которого открыт проект с одним из этих имён («файл @ имя», «(папка @ имя)», без открытых файлов - «имя - Qt Creator»); 0 - нет
+    // Процесс Qt Creator, в заголовке окна которого имя проекта отдельным словом («файл @ имя», «[ветка] - имя», «имя - Qt Creator»); 0 - нет
     static unsigned long findQtCreatorWithProject(const std::wstring &executableName, const std::vector<std::wstring> &names);
     // Открыть файл на строке в запущенной Visual Studio, где открыт этот проект (решение в папке проекта или сама папка); false - нет такой
     static bool openInRunningVisualStudio(const std::wstring &projectRoot, const std::wstring &file, int line);

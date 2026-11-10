@@ -254,7 +254,7 @@ std::vector<std::wstring> IdeLauncher::projectNames(const std::wstring &projectR
 }
 
 
-// Процесс Qt Creator, в заголовке окна которого открыт проект с одним из этих имён («файл @ имя», «(папка @ имя)», без открытых файлов - «имя - Qt Creator»); 0 - нет
+// Процесс Qt Creator, в заголовке окна которого имя проекта отдельным словом («файл @ имя», «[ветка] - имя», «имя - Qt Creator»); 0 - нет
 unsigned long IdeLauncher::findQtCreatorWithProject(const std::wstring &executableName, const std::vector<std::wstring> &names) {
 #ifdef _WIN32
     // Процессы Qt Creator
@@ -283,7 +283,8 @@ unsigned long IdeLauncher::findQtCreatorWithProject(const std::wstring &executab
     if (search.processIds.empty())
         return 0;
 
-    // Их видимые окна: заголовок с «@ имя», за которым не продолжение имени, или без открытых файлов - «имя - Qt Creator»
+    // Их видимые окна: имя проекта в заголовке отдельным словом («файл @ имя [ветка] - Qt Creator», «[ветка] - имя - Qt Creator»,
+    // «имя - Qt Creator»): перед ним начало, пробел или скобка, после - конец, пробел, скобка или дефис (не «имя.cpp», не «имя2»)
     EnumWindows([](HWND window, LPARAM data) -> BOOL {
         Search *search = reinterpret_cast<Search*>(data);
         DWORD processId = 0;
@@ -293,19 +294,19 @@ unsigned long IdeLauncher::findQtCreatorWithProject(const std::wstring &executab
         wchar_t title[512] = {};
         GetWindowTextW(window, title, 512);
         std::wstring titleText = title;
+        if (titleText.empty())
+            return TRUE;
+        Debug() << "Qt Creator: окно" << wstringToString(titleText);
         for (const std::wstring &name : search->names) {
-            if (titleText.rfind(name + L" - ", 0) == 0) {
-                search->foundProcessId = processId;
-                return FALSE;
-            }
-            std::wstring marker = L"@ " + name;
-            size_t position = titleText.find(marker);
-            if (position == std::wstring::npos)
-                continue;
-            size_t after = position + marker.size();
-            if (after == titleText.size() || !(std::iswalnum(titleText[after]) || titleText[after] == L'_')) {
-                search->foundProcessId = processId;
-                return FALSE;
+            for (size_t position = titleText.find(name); position != std::wstring::npos; position = titleText.find(name, position + 1)) {
+                size_t after = position + name.size();
+                bool isStartBound = position == 0 || titleText[position - 1] == L' ' || titleText[position - 1] == L'(' || titleText[position - 1] == L'[';
+                bool isEndBound = after == titleText.size() || titleText[after] == L' ' || titleText[after] == L')' || titleText[after] == L']' ||
+                                  titleText[after] == L'-';
+                if (isStartBound && isEndBound) {
+                    search->foundProcessId = processId;
+                    return FALSE;
+                }
             }
         }
         return TRUE;
