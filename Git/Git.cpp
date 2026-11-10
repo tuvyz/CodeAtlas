@@ -99,6 +99,22 @@ int Git::aheadCount(const std::wstring &projectRoot) {
 }
 
 
+// Сколько коммитов ветки отправки ещё не подтянуто в текущую (после fetch); 0 - нет или ветки отправки нет
+int Git::behindCount(const std::wstring &projectRoot) {
+    std::string output;
+    if (!run(projectRoot, L"rev-list --count HEAD..@{u}", output, false) || output.empty())
+        return 0;
+    return std::atoi(output.c_str());
+}
+
+
+// Подтянуть сведения о ветках с сервера (git fetch): рабочую папку не трогает
+bool Git::fetch(const std::wstring &projectRoot) {
+    std::string output;
+    return run(projectRoot, L"fetch --quiet", output, false);
+}
+
+
 // Последние коммиты текущей ветки, новые первыми
 std::vector<GitCommit> Git::listCommits(const std::wstring &projectRoot, int maxCount) {
     std::vector<GitCommit> commits;

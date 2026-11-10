@@ -56,6 +56,13 @@ private:
     int64_t headLogTime = 0;                   // Время правки HEAD и журналов HEAD и ветки отправки: сменилось - HEAD или ветка отправки сдвинулись
     std::string upstreamRef;                   // Ветка, за которой следит текущая (origin/master), пусто - не задана
     int aheadCount = -1;                       // Неотправленных коммитов (-1 - ветки для отправки нет)
+    int behindCount = 0;                       // Коммитов на сервере, ещё не подтянутых pull (по последнему fetch)
+
+    // Fetch раз в минуту в своём потоке: кнопка Pull показывает, сколько коммитов ждёт на сервере
+    std::thread fetchThread;
+    std::atomic<bool> isFetchFinished = false;
+    bool isFetching = false;
+    double lastFetchTime = -1e9;               // Когда последний раз запускали fetch, секунды
     std::string compareTarget = "previous";    // С чем сравнивать: previous - прошлый коммит (следует за HEAD), иначе хэш
     std::string compareCommit;                 // Хэш, с которым сравнивается карта сейчас (пусто - не с чем)
     std::map<std::string, Graph> commitGraphs;
@@ -125,6 +132,7 @@ private:
     vgui::LineEdit *commitEdit = nullptr;
     vgui::Button *commitButton = nullptr;
     vgui::Button *pushButton = nullptr;
+    vgui::Button *pullButton = nullptr;
     vgui::Button *compareButton = nullptr;
     vgui::CheckBox *diffCheck = nullptr;
     vgui::ScrollAreaWidget *commitListWindow = nullptr;
@@ -180,6 +188,8 @@ private:
     void checkChanges();
     // Дождаться проверки правок, если идёт (перед сменой проекта и выходом)
     void waitChangeCheck();
+    // Fetch с сервера раз в минуту в своём потоке (не во время команд git)
+    void checkRemote();
     // Команда git из полосы снизу
     void requestGitCommand(GitCommand command);
     // Кнопки git: коммит - только с сообщением, push - только когда есть неотправленные коммиты

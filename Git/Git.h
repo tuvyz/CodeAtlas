@@ -45,6 +45,12 @@ public:
     // Сколько коммитов текущей ветки ещё не отправлено в неё; -1 - ветка для отправки не задана
     static int aheadCount(const std::wstring &projectRoot);
 
+    // Сколько коммитов ветки отправки ещё не подтянуто в текущую (после fetch); 0 - нет или ветки отправки нет
+    static int behindCount(const std::wstring &projectRoot);
+
+    // Подтянуть сведения о ветках с сервера (git fetch): рабочую папку не трогает
+    static bool fetch(const std::wstring &projectRoot);
+
     // Последние коммиты текущей ветки, новые первыми
     static std::vector<GitCommit> listCommits(const std::wstring &projectRoot, int maxCount);
 

@@ -335,15 +335,16 @@ void App::createGui() {
         button->eventManager().subscribe<vgui::Button::Click_Event>(this, [this, command](const vgui::Button::Click_Event &) {requestGitCommand(command);});
         return button;
     };
-    addGitButton(14, 76, L"Pull", L"git pull; пришедшие правки карта пересканирует сама", GitCommand::Pull);
-    pushButton = addGitButton(96, 76, L"Push", L"git push; нечего отправлять - кнопка недоступна", GitCommand::Push);
+    pullButton = addGitButton(14, 96, L"Pull", L"git pull; пришедшие правки карта пересканирует сама. Стрелка - сколько коммитов ждёт на сервере "
+                              L"(fetch раз в минуту)", GitCommand::Pull);
+    pushButton = addGitButton(116, 76, L"Push", L"git push; нечего отправлять - кнопка недоступна", GitCommand::Push);
 
-    auto *commitTitle = new vgui::Label(vgui::MySize<double>(70, 30), glm::dvec2(190, 14), fixedSize, inParent, glm::dvec2(0, 0), L"Коммит");
+    auto *commitTitle = new vgui::Label(vgui::MySize<double>(70, 30), glm::dvec2(208, 14), fixedSize, inParent, glm::dvec2(0, 0), L"Коммит");
     commitTitle->setFontSize(13);
     commitTitle->setTextColor(mutedColor);
     gitBar->addChild(commitTitle);
 
-    commitEdit = new vgui::LineEdit(vgui::MySize<double>(300, 34), glm::dvec2(256, 12), fixedSize, inParent);
+    commitEdit = new vgui::LineEdit(vgui::MySize<double>(300, 34), glm::dvec2(274, 12), fixedSize, inParent);
     commitEdit->setToolTip(L"Сообщение коммита; Enter или «Закоммитить всё» - git add -A и commit");
     gitBar->addChild(commitEdit);
     commitEdit->eventManager().subscribe<vgui::LineEdit::TextChanged_Event>(this, [this](const vgui::LineEdit::TextChanged_Event &) {
@@ -614,9 +615,9 @@ void App::updateGuiGeometry() {
     gitBar->setStandardWidgetSize(vgui::MySize<double>(gitBarWidth, gitBarHeight));
 
     // Поле коммита - на всё место между Push и сравнением, список коммитов - над кнопкой сравнения
-    double commitEditWidth = std::max(160.0, gitBarWidth - 256 - 176 - 554 - 16);
+    double commitEditWidth = std::max(160.0, gitBarWidth - 274 - 176 - 554 - 16);
     commitEdit->setStandardWidgetSize(vgui::MySize<double>(commitEditWidth, 34));
-    commitButton->setStandardWidgetPos(glm::dvec2(256 + commitEditWidth + 6, 12));
+    commitButton->setStandardWidgetPos(glm::dvec2(274 + commitEditWidth + 6, 12));
     commitListWindow->setStandardWidgetPos(glm::dvec2(std::max(edgeGap, edgeGap + gitBarWidth - 444 - 320), -(gitBarHeight + 2 * edgeGap)));
     mapView.setViewport(windowSize);
     mapView.setViewInsets(glm::dvec4(0, (topBarHeight + edgeGap) * scale, (detailsWidth + 2 * edgeGap) * scale, (gitBarHeight + 2 * edgeGap) * scale));
@@ -685,6 +686,10 @@ void App::openProject(const std::wstring &root) {
 
     // Остальная фоновая работа - про прежний проект: остановить и дождаться
     waitChangeCheck();
+    if (isFetching) {
+        fetchThread.join();
+        isFetching = false;
+    }
     if (jobKind != JobKind::None) {
         analyzer.isStopRequested = true;
         jobThread.join();
@@ -738,6 +743,8 @@ void App::openProject(const std::wstring &root) {
     previousCommit.clear();
     upstreamRef.clear();
     aheadCount = -1;
+    behindCount = 0;
+    lastFetchTime = -1e9;
     headLogTime = 0;
     compareTarget = "previous";
     if (!gitDir.empty()) {
@@ -940,6 +947,10 @@ void App::startScan() {
 // Следующая фоновая работа, если поток свободен: команда git, сканирование, загрузка разобранного, пересканирование правок, графы коммитов
 void App::startNextJob() {
     if (jobKind != JobKind::None || isChangeChecking || project.root.empty())
+        return;
+
+    // Команда git ждёт конца fetch (два git сразу дерутся за блокировки ссылок)
+    if (requestedGitCommand != GitCommand::None && isFetching)
         return;
     std::filesystem::path dataDir(project.dataDir);
     std::filesystem::path statePath = dataDir / "scan.txt";
@@ -1306,6 +1317,32 @@ void App::checkChanges() {
 }
 
 
+// Fetch с сервера раз в минуту в своём потоке (не во время команд git); подтянутые ссылки замечает проверка HEAD и ветки отправки
+void App::checkRemote() {
+    constexpr double fetchInterval = 60; // Секунды между fetch
+    if (isFetching) {
+        if (!isFetchFinished)
+            return;
+        fetchThread.join();
+        isFetching = false;
+        lastChangeCheckTime = -1;
+    }
+    if (gitDir.empty() || upstreamRef.empty() || jobKind == JobKind::GitCommand || requestedGitCommand != GitCommand::None)
+        return;
+    double now = double(SDL_GetTicks()) / 1000.0;
+    if (now - lastFetchTime < fetchInterval)
+        return;
+    lastFetchTime = now;
+    isFetchFinished = false;
+    isFetching = true;
+    std::wstring root = project.root;
+    fetchThread = std::thread([this, root]() {
+        Git::fetch(root);
+        isFetchFinished = true;
+    });
+}
+
+
 // Дождаться проверки правок, если идёт (перед сменой проекта и выходом)
 void App::waitChangeCheck() {
     if (!isChangeChecking)
@@ -1405,6 +1442,7 @@ void App::updateGitButtons() {
     bool hasMessage = commitEdit->text().find_first_not_of(L" \t") != std::wstring::npos;
     commitButton->setBlocking(!hasMessage);
     pushButton->setBlocking(aheadCount == 0);
+    pullButton->setText(behindCount > 0 ? L"Pull ↓" + std::to_wstring(behindCount) : std::wstring(L"Pull"));
 }
 
 
@@ -1414,6 +1452,7 @@ void App::readGitHead() {
     previousCommit = Git::resolve(project.root, "HEAD~1");
     upstreamRef = Git::upstream(project.root);
     aheadCount = upstreamRef.empty() ? -1 : Git::aheadCount(project.root);
+    behindCount = upstreamRef.empty() ? 0 : Git::behindCount(project.root);
     std::filesystem::path logs = std::filesystem::path(gitDir) / "logs";
     headLogTime = fileTime(logs / "HEAD") + fileTime(std::filesystem::path(gitDir) / "HEAD") +
                   (upstreamRef.empty() ? 0 : fileTime(logs / "refs" / "remotes" / std::filesystem::u8path(upstreamRef)));
@@ -2115,6 +2154,7 @@ int App::run(const std::wstring &projectRoot) {
                 analyzer.isStopRequested = true;
         }
         checkChanges();
+        checkRemote();
         pollJob();
         startNextJob();
         if (isDetailsDirty)
@@ -2139,6 +2179,9 @@ int App::run(const std::wstring &projectRoot) {
         analyzer.isStopRequested = true;
         jobThread.join();
     }
+    // Fetch может ждать сеть - выход его не ждёт
+    if (isFetching)
+        fetchThread.detach();
     saveLayout();
     if (isSettingsChanged)
         settings().save();
