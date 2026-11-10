@@ -336,7 +336,7 @@ void App::createGui() {
         return button;
     };
     pullButton = addGitButton(14, 96, L"Pull", L"git pull; пришедшие правки карта пересканирует сама. Стрелка - сколько коммитов ждёт на сервере "
-                              L"(fetch раз в минуту)", GitCommand::Pull);
+                              L"(проверка при переходе в окно и раз в минуту, пока оно активно)", GitCommand::Pull);
     pushButton = addGitButton(116, 76, L"Push", L"git push; нечего отправлять - кнопка недоступна", GitCommand::Push);
 
     auto *commitTitle = new vgui::Label(vgui::MySize<double>(70, 30), glm::dvec2(208, 14), fixedSize, inParent, glm::dvec2(0, 0), L"Коммит");
@@ -1317,9 +1317,10 @@ void App::checkChanges() {
 }
 
 
-// Fetch с сервера раз в минуту в своём потоке (не во время команд git); подтянутые ссылки замечает проверка HEAD и ветки отправки
+// Fetch с сервера в своём потоке, пока окно активно: сразу при переходе в окно, дальше раз в минуту (не во время команд git);
+// подтянутые ссылки замечает проверка HEAD и ветки отправки
 void App::checkRemote() {
-    constexpr double fetchInterval = 60; // Секунды между fetch
+    constexpr double fetchInterval = 60; // Секунды между fetch, пока окно активно
     if (isFetching) {
         if (!isFetchFinished)
             return;
@@ -1327,7 +1328,7 @@ void App::checkRemote() {
         isFetching = false;
         lastChangeCheckTime = -1;
     }
-    if (gitDir.empty() || upstreamRef.empty() || jobKind == JobKind::GitCommand || requestedGitCommand != GitCommand::None)
+    if (!isWindowFocused || gitDir.empty() || upstreamRef.empty() || jobKind == JobKind::GitCommand || requestedGitCommand != GitCommand::None)
         return;
     double now = double(SDL_GetTicks()) / 1000.0;
     if (now - lastFetchTime < fetchInterval)
@@ -2085,6 +2086,15 @@ int App::run(const std::wstring &projectRoot) {
         while (hasEvent) {
             if (event.type == SDL_QUIT)
                 isRunning = false;
+            // Переход в окно - сразу fetch (не чаще раза в 5 секунд: щёлканье между окнами сервер не дёргает)
+            if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED) {
+                constexpr double minimumFetchInterval = 5;
+                isWindowFocused = true;
+                if (double(SDL_GetTicks()) / 1000.0 - lastFetchTime >= minimumFetchInterval)
+                    lastFetchTime = -1e9;
+            }
+            if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_FOCUS_LOST)
+                isWindowFocused = false;
             if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
                 windowSize = glm::ivec2(event.window.data1, event.window.data2);
                 gui->updateScaleFactor(windowSize.y / 1080.0, vgui::MySize<int>(windowSize.x, windowSize.y));

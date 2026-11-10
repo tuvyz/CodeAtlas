@@ -63,6 +63,7 @@ private:
     std::atomic<bool> isFetchFinished = false;
     bool isFetching = false;
     double lastFetchTime = -1e9;               // Когда последний раз запускали fetch, секунды
+    bool isWindowFocused = true;               // Окно атласа активно: fetch только тогда (при переходе в окно - сразу)
     std::string compareTarget = "previous";    // С чем сравнивать: previous - прошлый коммит (следует за HEAD), иначе хэш
     std::string compareCommit;                 // Хэш, с которым сравнивается карта сейчас (пусто - не с чем)
     std::map<std::string, Graph> commitGraphs;
@@ -188,7 +189,7 @@ private:
     void checkChanges();
     // Дождаться проверки правок, если идёт (перед сменой проекта и выходом)
     void waitChangeCheck();
-    // Fetch с сервера раз в минуту в своём потоке (не во время команд git)
+    // Fetch с сервера в своём потоке, пока окно активно: сразу при переходе в окно, дальше раз в минуту (не во время команд git)
     void checkRemote();
     // Команда git из полосы снизу
     void requestGitCommand(GitCommand command);
