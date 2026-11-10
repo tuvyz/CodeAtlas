@@ -254,7 +254,7 @@ std::vector<std::wstring> IdeLauncher::projectNames(const std::wstring &projectR
 }
 
 
-// Процесс Qt Creator, в заголовке окна которого открыт файл проекта с одним из этих имён («файл @ имя» или «(папка @ имя)»); 0 - нет
+// Процесс Qt Creator, в заголовке окна которого открыт проект с одним из этих имён («файл @ имя», «(папка @ имя)», без открытых файлов - «имя - Qt Creator»); 0 - нет
 unsigned long IdeLauncher::findQtCreatorWithProject(const std::wstring &executableName, const std::vector<std::wstring> &names) {
 #ifdef _WIN32
     // Процессы Qt Creator
@@ -283,7 +283,7 @@ unsigned long IdeLauncher::findQtCreatorWithProject(const std::wstring &executab
     if (search.processIds.empty())
         return 0;
 
-    // Их видимые окна: заголовок с «@ имя», за которым не продолжение имени
+    // Их видимые окна: заголовок с «@ имя», за которым не продолжение имени, или без открытых файлов - «имя - Qt Creator»
     EnumWindows([](HWND window, LPARAM data) -> BOOL {
         Search *search = reinterpret_cast<Search*>(data);
         DWORD processId = 0;
@@ -294,6 +294,10 @@ unsigned long IdeLauncher::findQtCreatorWithProject(const std::wstring &executab
         GetWindowTextW(window, title, 512);
         std::wstring titleText = title;
         for (const std::wstring &name : search->names) {
+            if (titleText.rfind(name + L" - ", 0) == 0) {
+                search->foundProcessId = processId;
+                return FALSE;
+            }
             std::wstring marker = L"@ " + name;
             size_t position = titleText.find(marker);
             if (position == std::wstring::npos)
