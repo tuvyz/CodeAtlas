@@ -432,14 +432,14 @@ void MapView::buildScene() {
             border = hexColor(0x5AA57A);
             text = hexColor(0x1F4A31);
             shapeKind = ShapeKind::Parallelogram;
-            corner = 7;
+            corner = float(Layout::parallelogramShift);
             break;
         case NodeKind::Event:
             fill = hexColor(0xFDF0E1);
             border = hexColor(0xD58B3B);
             text = hexColor(0x5A3410);
             shapeKind = ShapeKind::Parallelogram;
-            corner = 7;
+            corner = float(Layout::parallelogramShift);
             break;
         }
         if (isDiffShown && nodeIndex < int(diffStates.size())) {
@@ -498,7 +498,7 @@ void MapView::buildScene() {
             nodeLayer.shapes.push_back(boxShape(stripe, ShapeKind::RoundBox, 1.5f * scale, accent, glm::vec4(0), 0));
             textLeft = 14;
         } else if (shapeKind == ShapeKind::Parallelogram) {
-            textLeft = 15;
+            textLeft = 12 + float(Layout::parallelogramShift);
         }
         textLeft *= scale;
 
@@ -574,11 +574,18 @@ void MapView::handleEvent(const SDL_Event &event, bool isCursorOverGui) {
         if (event.button.button != SDL_BUTTON_LEFT)
             return;
 
-        // Двойной щелчок по блоку - вид на него
+        // Двойной щелчок по блоку - вид на него, по рамке файла - файл в IDE (у общей рамки - половина под курсором)
         if (event.button.clicks == 2) {
             int node = hitNode(world);
             if (node >= 0) {
                 focusNode(node);
+                dragKind = DragKind::None;
+                return;
+            }
+            for (const FileFrame &frame : frames) {
+                if (!frame.rect.contains(world))
+                    continue;
+                openFileRequest = frame.hasSeparator && world.y > frame.separatorY ? frame.lowerFile : frame.upperFile;
                 dragKind = DragKind::None;
                 return;
             }

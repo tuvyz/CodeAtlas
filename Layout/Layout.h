@@ -49,6 +49,7 @@ public:
     static constexpr double framePadding = 12;        // Отступ блоков от края рамки файла
     static constexpr double frameGap = 28;            // Зазор между рамками файлов
     static constexpr double sectionGap = 26;          // Зазор между блоками заголовка и исходника в общей рамке (посередине - черта)
+    static constexpr double parallelogramShift = 7;   // Скос блока компонента и события: верх сдвинут вправо на вдвое больше, блок на столько же шире
     static constexpr double folderPadding = 22;       // Отступ рамок от края области папки
     static constexpr int maxFolderDepth = 3;          // Папки глубже не рисуются областями: их файлы - в области папки этого уровня
     static double nodeTextSize() {return settings().nodeTextSize;}               // Высота шрифта имени в блоке
@@ -67,7 +68,7 @@ public:
 
     // Во сколько раз блок узла больше обычного (вместе с именем): у функции - по числу строк, как задано в настройках, у остальных - 1
     static double nodeScale(const GraphNode &node);
-    // Размер блока узла: ширина - под имя целиком (не уже наименьшей)
+    // Размер блока узла: ширина - под имя целиком (не уже наименьшей), у компонента и события - ещё на скос
     static glm::dvec2 nodeSize(const GraphNode &node);
     // Размер пометки
     static glm::dvec2 noteSize(const LayoutNote &note);

@@ -50,6 +50,7 @@ public:
 
     // Итог ввода для окна: выбор сменился, раскладка изменилась (сохранить), просьба о меню по правой кнопке
     bool isSelectionChanged = false;
+    std::wstring openFileRequest;      // Файл (от корня проекта), который просят открыть в IDE двойным щелчком по рамке; пусто - не просят
     bool isLayoutChanged = false;
     struct ContextRequest {
         bool isRequested = false;

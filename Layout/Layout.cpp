@@ -17,10 +17,12 @@ double Layout::nodeScale(const GraphNode &node) {
     return std::min(1.5 + 0.5 * std::floor(std::log(lines / step) / std::log(3.0) + 1e-9), maxLogScale);
 }
 
-// Размер блока узла: ширина - под имя целиком (не уже наименьшей)
+// Размер блока узла: ширина - под имя целиком (не уже наименьшей), у компонента и события - ещё на скос
 glm::dvec2 Layout::nodeSize(const GraphNode &node) {
     double width = double(node.name.size()) * nodeCharWidth() + nodeTextSize() * 2.3;
-    return glm::dvec2(std::max(width, nodeTextSize() * 8.5), nodeHeight()) * nodeScale(node);
+    bool isParallelogram = node.kind == NodeKind::Component || node.kind == NodeKind::Event;
+    width = std::max(width, nodeTextSize() * 8.5) + (isParallelogram ? 2 * parallelogramShift : 0);
+    return glm::dvec2(width, nodeHeight()) * nodeScale(node);
 }
 
 // Размер пометки

@@ -1833,7 +1833,7 @@ void App::rebuildDetails() {
         addLabel(L"УПРАВЛЕНИЕ", 12, accentColor);
         y += 4;
         for (const wchar_t *line : {L"Колесо - масштаб у курсора", L"Тащить пустое место - сдвиг вида", L"Щелчок по блоку - связи и описание",
-                                    L"Двойной щелчок - приблизить блок", L"Тащить блок, имя файла или папки - переставить",
+                                    L"Двойной щелчок - приблизить блок, по файлу - открыть в IDE", L"Тащить блок, имя файла или папки - переставить",
                                     L"Правая кнопка - меню: пометка, раскладка", L"Ctrl+Z - отменить перестановку", L"F - вся карта, Esc - снять выбор",
                                     L"F5 - сканировать"})
             addParagraph(line, 13, inkColor);
@@ -2135,6 +2135,10 @@ int App::run(const std::wstring &projectRoot) {
         if (mapView.contextRequest.isRequested) {
             mapView.contextRequest.isRequested = false;
             openContextMenu(mapView.contextRequest);
+        }
+        if (!mapView.openFileRequest.empty()) {
+            openInIde(mapView.openFileRequest, 1);
+            mapView.openFileRequest.clear();
         }
         if (!pendingSelectId.empty()) {
             int nodeIndex = shownGraph.findNode(pendingSelectId);
