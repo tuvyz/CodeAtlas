@@ -336,7 +336,7 @@ void App::createGui() {
         return button;
     };
     pullButton = addGitButton(14, 96, L"Pull", L"git pull; пришедшие правки карта пересканирует сама. Стрелка - сколько коммитов ждёт на сервере "
-                              L"(проверка при переходе в окно и раз в минуту, пока оно активно)", GitCommand::Pull);
+                              L"(проверка при переходе в окно, раз в минуту в активном окне и раз в 5 минут в неактивном)", GitCommand::Pull);
     pushButton = addGitButton(116, 76, L"Push", L"git push; нечего отправлять - кнопка недоступна", GitCommand::Push);
 
     auto *commitTitle = new vgui::Label(vgui::MySize<double>(70, 30), glm::dvec2(208, 14), fixedSize, inParent, glm::dvec2(0, 0), L"Коммит");
@@ -1317,10 +1317,11 @@ void App::checkChanges() {
 }
 
 
-// Fetch с сервера в своём потоке, пока окно активно: сразу при переходе в окно, дальше раз в минуту (не во время команд git);
-// подтянутые ссылки замечает проверка HEAD и ветки отправки
+// Fetch с сервера в своём потоке: сразу при переходе в окно, в активном окне - раз в минуту, в неактивном - раз в 5 минут (не во время
+// команд git); подтянутые ссылки замечает проверка HEAD и ветки отправки
 void App::checkRemote() {
-    constexpr double fetchInterval = 60; // Секунды между fetch, пока окно активно
+    constexpr double focusedFetchInterval = 60;     // Секунды между fetch, пока окно активно
+    constexpr double backgroundFetchInterval = 300; // Секунды между fetch, пока окно неактивно
     if (isFetching) {
         if (!isFetchFinished)
             return;
@@ -1328,10 +1329,10 @@ void App::checkRemote() {
         isFetching = false;
         lastChangeCheckTime = -1;
     }
-    if (!isWindowFocused || gitDir.empty() || upstreamRef.empty() || jobKind == JobKind::GitCommand || requestedGitCommand != GitCommand::None)
+    if (gitDir.empty() || upstreamRef.empty() || jobKind == JobKind::GitCommand || requestedGitCommand != GitCommand::None)
         return;
     double now = double(SDL_GetTicks()) / 1000.0;
-    if (now - lastFetchTime < fetchInterval)
+    if (now - lastFetchTime < (isWindowFocused ? focusedFetchInterval : backgroundFetchInterval))
         return;
     lastFetchTime = now;
     isFetchFinished = false;
