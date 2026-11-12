@@ -1,0 +1,3 @@
+[submodule "Libs/VisorGUI"]
+	path = Libs/VisorGUI
+	url = https://github.com/tuvyz/VisorGUI.git
