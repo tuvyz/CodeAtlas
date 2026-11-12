@@ -41,7 +41,7 @@
 
 ## Сборка
 
-C++20, CMake. Остальные зависимости: SDL2, GLEW, FreeType, glm, fmt (для Windows лежат в Libs), интерфейс - [VisorGUI](https://github.com/tuvyz/VisorGUI) (подмодуль Libs/VisorGUI: клонировать с --recurse-submodules).
+C++20, CMake. Остальные зависимости: SDL2, GLEW, FreeType, glm, fmt (для Windows лежат в Libs), интерфейс - [VisorGUI](https://github.com/tuvyz/VisorGUI) (подмодуль Libs/VisorGUI: подтягивается сам при настройке CMake, или клонировать с --recurse-submodules).
 
 Windows (MSVC, Qt Creator или Visual Studio): поставить LLVM (выше) и собрать CMake-проект; рядом с exe копируются SDL2.dll и libclang.dll.
 

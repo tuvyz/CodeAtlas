@@ -5,6 +5,17 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Подмодули (Libs/VisorGUI): клон без --recurse-submodules получает их здесь, а submodule.recurse в настройках клона
+# обновляет их при git pull и checkout - глобальная настройка git на каждом компьютере не нужна
+find_package(Git QUIET)
+if(GIT_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
+    execute_process(COMMAND ${GIT_EXECUTABLE} config submodule.recurse true WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Libs/VisorGUI/CMakeLists.txt")
+        message(STATUS "Подмодули git: подтягиваю Libs/VisorGUI")
+        execute_process(COMMAND ${GIT_EXECUTABLE} submodule update --init --recursive WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+    endif()
+endif()
+
 # Исходники программы
 file(GLOB_RECURSE CODEATLAS_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_SOURCE_DIR}/Analyzer/*.cpp"
