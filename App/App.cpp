@@ -507,6 +507,10 @@ void App::createSettingsWindow() {
     addRow(L"Строк на ступень", L"Логарифм: с этого числа строк блок в 1.5 раза больше, каждая следующая ступень (+0.5) - втрое больше строк. "
                                 L"По строкам: столько строк у блока обычного размера, площадь растёт с числом строк",
            5, 200, 5, []() {return settings().linesPerStep;}, [](double value) {settings().linesPerStep = value;}, whole, true);
+    addRow(L"Между файлами", L"Наименьший зазор между рамками файлов, единицы холста: ближе рамки расступаются",
+           10, 300, 5, []() {return settings().fileGap;}, [](double value) {settings().fileGap = value;}, whole, true);
+    addRow(L"Между папками", L"Наименьший зазор от области папки до соседних папок и рамок файлов, единицы холста: ближе - расступаются",
+           10, 600, 5, []() {return settings().folderGap;}, [](double value) {settings().folderGap = value;}, whole, true);
 
     y += 8;
     addSection(L"РАЗБОР");

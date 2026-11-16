@@ -71,6 +71,10 @@ void Settings::load() {
             nodeSizeMode = std::clamp(int(value), 0, 2);
         else if (key == "lines_per_step")
             linesPerStep = std::clamp(value, 5.0, 200.0);
+        else if (key == "file_gap")
+            fileGap = std::clamp(value, 10.0, 300.0);
+        else if (key == "folder_gap")
+            folderGap = std::clamp(value, 10.0, 600.0);
     }
 }
 
@@ -88,6 +92,8 @@ bool Settings::save() const {
          << "scan_threads: " << scanThreads << '\n'
          << "node_size_mode: " << nodeSizeMode << '\n'
          << "lines_per_step: " << linesPerStep << '\n'
+         << "file_gap: " << fileGap << '\n'
+         << "folder_gap: " << folderGap << '\n'
          << "ide_kind: " << ideKind << '\n'
          << "ide_command: " << wstringToString(ideCommand) << '\n';
     return bool(file);

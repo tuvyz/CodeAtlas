@@ -47,7 +47,6 @@ public:
     static constexpr double nodeGapX = 18;            // Зазор между столбцами блоков в рамке файла
     static constexpr double nodeGapY = 10;            // Зазор между строками блоков
     static constexpr double framePadding = 12;        // Отступ блоков от края рамки файла
-    static constexpr double frameGap = 28;            // Зазор между рамками файлов
     static constexpr double sectionGap = 26;          // Зазор между блоками заголовка и исходника в общей рамке (посередине - черта)
     static constexpr double parallelogramShift = 7;   // Скос блока компонента и события: верх сдвинут вправо на вдвое больше, блок на столько же шире
     static constexpr double folderPadding = 22;       // Отступ рамок от края области папки
@@ -59,6 +58,8 @@ public:
     static double frameTitleSize() {return settings().fileTitleSize;}            // Высота шрифта имени файла
     static double frameHeaderHeight() {return frameTitleSize() * 1.8;}           // Полоса имени файла над блоками
     static double folderTitleSize() {return settings().folderTitleSize;}         // Высота шрифта имени папки верхнего уровня
+    static double fileGap() {return settings().fileGap;}                         // Зазор между рамками файлов
+    static double folderGap() {return settings().folderGap;}                     // Зазор от области папки до соседних папок и рамок файлов
 
     std::map<std::string, glm::dvec2> nodePositions; // Левый верхний угол блока по id узла
     std::vector<LayoutNote> notes;
@@ -114,15 +115,16 @@ public:
     static LayoutRect folderArea(const std::vector<LayoutRect> &children, const std::wstring &path, int depth);
 
 private:
-    // Блок, рамка или область при раздвигании: место, закреплено ли, узлы под ним, итоговый сдвиг
+    // Блок, рамка или область при раздвигании: место, закреплено ли, узлы под ним, зазор до соседей, итоговый сдвиг
     struct SeparationItem {
         LayoutRect rect;
         bool isPinned = false;
         std::vector<int> nodes;
+        glm::dvec2 gap{0, 0};   // Наименьший зазор до соседа по x и y, единицы холста (у пары соседей берётся больший)
         glm::dvec2 shift{0, 0};
     };
-    // Раздвинуть набор соседей с зазором gap (по x и y): закреплённые ставятся первыми, остальные по порядку чтения
-    static int separateItems(std::vector<SeparationItem> &items, glm::dvec2 gap);
+    // Раздвинуть набор соседей с их зазорами: закреплённые ставятся первыми, остальные по порядку чтения
+    static int separateItems(std::vector<SeparationItem> &items);
     // Блоки исходника в общей рамке - под блоками заголовка через sectionGap (налезшие, ушедшие вниз или вбок - сдвигаются); возвращает число сдвинутых рамок
     int stackSections(const Graph &graph, const std::map<std::wstring, std::vector<int>> &byFrame);
 

@@ -319,25 +319,27 @@ glm::dvec2 Layout::packFiles(const Graph &graph, const std::map<std::wstring, st
         folder->files.push_back(file);
     }
 
-    // Упаковка полками снизу вверх: сначала подпапки по имени, потом файлы по имени; ширина полки - около полутора сторон квадрата
+    // Упаковка полками снизу вверх: сначала подпапки по имени, потом файлы по имени; ширина полки - около полутора сторон квадрата.
+    // Между соседями - больший из их зазоров (у подпапки - зазор папок, у файла - файлов)
     auto pack = [&](auto &self, Folder &folder, bool isRoot) -> void {
         struct Item {
             Folder *folder;
             std::wstring file;
             glm::dvec2 size;
+            double gap;
         };
         std::vector<Item> items;
         for (auto &[name, child] : folder.children) {
             self(self, child, false);
-            items.push_back(Item{&child, std::wstring(), child.size});
+            items.push_back(Item{&child, std::wstring(), child.size, folderGap()});
         }
         for (const std::wstring &file : folder.files)
-            items.push_back(Item{nullptr, file, fileGridFrameSize(graph, byFile.at(file))});
+            items.push_back(Item{nullptr, file, fileGridFrameSize(graph, byFile.at(file)), fileGap()});
 
         double area = 0;
         double widest = 0;
         for (const Item &item : items) {
-            area += (item.size.x + frameGap) * (item.size.y + frameGap);
+            area += (item.size.x + item.gap) * (item.size.y + item.gap);
             widest = std::max(widest, item.size.x);
         }
         double shelfWidth = std::max(widest, std::sqrt(area) * 1.5);
@@ -349,20 +351,28 @@ glm::dvec2 Layout::packFiles(const Graph &graph, const std::map<std::wstring, st
         double top = hasHeader ? folderHeaderHeight(projectDepth) : 0;
         glm::dvec2 cursor(inset, top + inset);
         double rowHeight = 0;
+        double rowGap = 0;      // Больший зазор в текущей полке: от него отступает следующая полка
+        double previousGap = 0; // Зазор предыдущего в полке
         double contentWidth = hasHeader ? folderTitleBox(folder.name, projectDepth).x : 0;
         for (const Item &item : items) {
-            if (cursor.x > inset && cursor.x - inset + item.size.x > shelfWidth) {
+            double gap = std::max(previousGap, item.gap);
+            if (cursor.x > inset && cursor.x - inset + gap + item.size.x > shelfWidth) {
                 cursor.x = inset;
-                cursor.y += rowHeight + frameGap;
+                cursor.y += rowHeight + std::max(rowGap, item.gap);
                 rowHeight = 0;
+                rowGap = 0;
+            } else if (cursor.x > inset) {
+                cursor.x += gap;
             }
             if (item.folder != nullptr)
                 folder.folderOffsets.push_back({item.folder, cursor});
             else
                 folder.fileOffsets.push_back({item.file, cursor});
-            cursor.x += item.size.x + frameGap;
+            cursor.x += item.size.x;
             rowHeight = std::max(rowHeight, item.size.y);
-            contentWidth = std::max(contentWidth, cursor.x - frameGap - inset);
+            rowGap = std::max(rowGap, item.gap);
+            previousGap = item.gap;
+            contentWidth = std::max(contentWidth, cursor.x - inset);
         }
         folder.size = glm::dvec2(contentWidth + 2 * inset, cursor.y + rowHeight + inset);
     };
@@ -497,7 +507,7 @@ int Layout::placeNewNodes(const Graph &graph) {
                 break;
             folder = folder.parent_path();
         }
-        return hasNeighbours ? glm::dvec2(neighbours.position.x + neighbours.size.x + frameGap, neighbours.position.y) : glm::dvec2(0, 0);
+        return hasNeighbours ? glm::dvec2(neighbours.position.x + neighbours.size.x + fileGap(), neighbours.position.y) : glm::dvec2(0, 0);
     };
     // Свободное место размера size - по кольцам вокруг желаемого, шаг 60
     auto freePlace = [&](glm::dvec2 desired, glm::dvec2 size) {
@@ -511,7 +521,7 @@ int Layout::placeNewNodes(const Graph &graph) {
                     LayoutRect candidate{desired + glm::dvec2(dx, dy) * searchStep, size};
                     bool isFree = true;
                     for (const auto &[otherFile, frame] : frames) {
-                        if (candidate.intersects(frame, frameGap)) {
+                        if (candidate.intersects(frame, fileGap())) {
                             isFree = false;
                             break;
                         }
@@ -559,8 +569,8 @@ int Layout::placeNewNodes(const Graph &graph) {
 }
 
 
-// Раздвинуть набор соседей с зазором gap (по x и y): закреплённые ставятся первыми, остальные по порядку чтения
-int Layout::separateItems(std::vector<SeparationItem> &items, glm::dvec2 gap) {
+// Раздвинуть набор соседей с их зазорами: закреплённые ставятся первыми, остальные по порядку чтения
+int Layout::separateItems(std::vector<SeparationItem> &items) {
     std::vector<int> order(items.size());
     for (int i = 0; i < int(items.size()); ++i)
         order[i] = i;
@@ -572,9 +582,9 @@ int Layout::separateItems(std::vector<SeparationItem> &items, glm::dvec2 gap) {
         return items[first].rect.position.x < items[second].rect.position.x;
     });
 
-    // Наложение с зазором; доля единицы на погрешность, чтобы вставший ровно на зазор не считался налезшим
+    // Наложение с зазором gap; доля единицы на погрешность, чтобы вставший ровно на зазор не считался налезшим
     constexpr double tolerance = 1e-6;
-    auto isOverlapped = [&](const LayoutRect &first, const LayoutRect &second) {
+    auto isOverlapped = [&](const LayoutRect &first, const LayoutRect &second, glm::dvec2 gap) {
         return first.position.x - gap.x < second.position.x + second.size.x - tolerance && second.position.x < first.position.x + first.size.x + gap.x - tolerance &&
                first.position.y - gap.y < second.position.y + second.size.y - tolerance && second.position.y < first.position.y + first.size.y + gap.y - tolerance;
     };
@@ -590,8 +600,10 @@ int Layout::separateItems(std::vector<SeparationItem> &items, glm::dvec2 gap) {
             glm::dvec2 startPosition = item.rect.position;
             for (int step = 0; step < maxSteps; ++step) {
                 int obstacleIndex = -1;
+                glm::dvec2 gap(0, 0);
                 for (int placedIndex : placed) {
-                    if (isOverlapped(item.rect, items[placedIndex].rect)) {
+                    gap = glm::max(item.gap, items[placedIndex].gap);
+                    if (isOverlapped(item.rect, items[placedIndex].rect, gap)) {
                         obstacleIndex = placedIndex;
                         break;
                     }
@@ -695,9 +707,10 @@ int Layout::separate(const Graph &graph, const std::set<std::string> &pinnedIds)
         for (int nodeIndex : nodes) {
             auto found = nodePositions.find(graph.nodes[nodeIndex].id);
             if (found != nodePositions.end())
-                items.push_back(SeparationItem{LayoutRect{found->second, nodeSize(graph.nodes[nodeIndex])}, hasPinned({nodeIndex}), {nodeIndex}});
+                items.push_back(SeparationItem{LayoutRect{found->second, nodeSize(graph.nodes[nodeIndex])}, hasPinned({nodeIndex}), {nodeIndex},
+                                               glm::dvec2(nodeGapX, nodeGapY)});
         }
-        movedCount += separateItems(items, glm::dvec2(nodeGapX, nodeGapY));
+        movedCount += separateItems(items);
         moveItems(items);
     }
     movedCount += stackSections(graph, byFile);
@@ -732,7 +745,8 @@ int Layout::separate(const Graph &graph, const std::set<std::string> &pinnedIds)
         return depthOf(first) > depthOf(second);
     });
 
-    // В каждой папке: рамки её файлов и области подпапок; после - её область (с отступами и полосой имени) и узлы для папки выше
+    // В каждой папке: рамки её файлов и области подпапок (между рамками - зазор файлов, у области - зазор папок); после - её область
+    // (с отступами и полосой имени) и узлы для папки выше
     std::map<std::wstring, LayoutRect> areaRects;
     std::map<std::wstring, std::vector<int>> nodesOf;
     for (const std::wstring &folder : deepestFirst) {
@@ -740,14 +754,14 @@ int Layout::separate(const Graph &graph, const std::set<std::string> &pinnedIds)
         for (const std::wstring &file : filesOf[folder]) {
             LayoutRect frame = fileFrame(graph, byFile[file]);
             if (frame.size.x > 0)
-                items.push_back(SeparationItem{frame, hasPinned(byFile[file]), byFile[file]});
+                items.push_back(SeparationItem{frame, hasPinned(byFile[file]), byFile[file], glm::dvec2(fileGap())});
         }
         for (const std::wstring &subfolder : subfoldersOf[folder]) {
             auto found = areaRects.find(subfolder);
             if (found != areaRects.end())
-                items.push_back(SeparationItem{found->second, hasPinned(nodesOf[subfolder]), nodesOf[subfolder]});
+                items.push_back(SeparationItem{found->second, hasPinned(nodesOf[subfolder]), nodesOf[subfolder], glm::dvec2(folderGap())});
         }
-        movedCount += separateItems(items, glm::dvec2(frameGap, frameGap));
+        movedCount += separateItems(items);
         moveItems(items);
         if (items.empty() || folder.empty())
             continue;
