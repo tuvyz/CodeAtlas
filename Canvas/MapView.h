@@ -146,6 +146,7 @@ private:
     std::vector<FileFrame> frames;
     std::vector<FolderArea> folders;
     std::vector<LayoutRect> nodeRects;  // Блоки узлов graph (размер 0 - узла нет на холсте)
+    LayoutRect mapBounds;               // Охват карты: рамки файлов, области папок и пометки (размер 0 - карта пуста)
 
     // Цель плавного хода камеры
     glm::dvec2 targetCenter{0, 0};
@@ -171,7 +172,7 @@ private:
     };
     std::vector<LayoutState> undoStack;
 
-    // Рамки файлов, области папок и блоки из мест раскладки
+    // Рамки файлов, области папок, блоки и охват карты из мест раскладки
     void rebuildGeometry();
     // Слои рисования
     void buildScene();

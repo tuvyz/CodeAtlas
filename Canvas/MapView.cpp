@@ -73,10 +73,11 @@ bool MapView::init(const std::string &fontPath) {
 }
 
 
-// Рамки файлов, области папок и блоки из мест раскладки
+// Рамки файлов, области папок, блоки и охват карты из мест раскладки
 void MapView::rebuildGeometry() {
     frames.clear();
     folders.clear();
+    mapBounds = LayoutRect();
     nodeRects.assign(graph != nullptr ? graph->nodes.size() : 0, LayoutRect());
     if (graph == nullptr || layout == nullptr)
         return;
@@ -175,6 +176,23 @@ void MapView::rebuildGeometry() {
             childRects[path.substr(0, slash)].push_back(area.rect);
     }
     std::sort(folders.begin(), folders.end(), [](const FolderArea &first, const FolderArea &second) {return first.depth < second.depth;});
+
+    // Охват карты: рамки файлов, области папок и пометки
+    glm::dvec2 minimum(1e300), maximum(-1e300);
+    for (const FileFrame &frame : frames) {
+        minimum = glm::min(minimum, frame.rect.position);
+        maximum = glm::max(maximum, frame.rect.position + frame.rect.size);
+    }
+    for (const FolderArea &area : folders) {
+        minimum = glm::min(minimum, area.rect.position);
+        maximum = glm::max(maximum, area.rect.position + area.rect.size);
+    }
+    for (const LayoutNote &note : layout->notes) {
+        minimum = glm::min(minimum, note.position);
+        maximum = glm::max(maximum, note.position + Layout::noteSize(note));
+    }
+    if (minimum.x <= maximum.x)
+        mapBounds = LayoutRect{minimum, glm::max(maximum - minimum, glm::dvec2(1))};
 }
 
 
@@ -718,7 +736,14 @@ void MapView::handleEvent(const SDL_Event &event, bool isCursorOverGui) {
         SDL_GetMouseState(&mouseX, &mouseY);
         glm::dvec2 mouse(mouseX, mouseY);
         glm::dvec2 worldUnderCursor = screenToWorld(mouse);
-        zoom = std::clamp(zoom * std::pow(1 + settings().wheelZoomStep / 100, double(event.wheel.y)), 0.02, 4.0);
+
+        // Отдаление - до 0.02, а большую карту - пока она целиком не займёт половину открытой части холста
+        double minimumZoom = 0.02;
+        if (mapBounds.size.x > 0) {
+            glm::dvec2 open = glm::max(glm::dvec2(viewport) - glm::dvec2(viewInsets.x + viewInsets.z, viewInsets.y + viewInsets.w), glm::dvec2(50));
+            minimumZoom = std::min(minimumZoom, std::min(open.x / mapBounds.size.x, open.y / mapBounds.size.y) * 0.5);
+        }
+        zoom = std::clamp(zoom * std::pow(1 + settings().wheelZoomStep / 100, double(event.wheel.y)), minimumZoom, 4.0);
         cameraCenter = worldUnderCursor - (mouse - glm::dvec2(viewport) * 0.5) / zoom;
         targetCenter = cameraCenter;
         targetZoom = zoom;
@@ -772,30 +797,14 @@ void MapView::render(glm::ivec2 viewportSize) {
 // Вид на всю карту (сразу или плавно) и на узел
 void MapView::fitAll(bool isImmediate) {
     rebuildGeometry();
-    glm::dvec2 minimum(1e300), maximum(-1e300);
-    for (const FileFrame &frame : frames) {
-        minimum = glm::min(minimum, frame.rect.position);
-        maximum = glm::max(maximum, frame.rect.position + frame.rect.size);
-    }
-    for (const FolderArea &area : folders) {
-        minimum = glm::min(minimum, area.rect.position);
-        maximum = glm::max(maximum, area.rect.position + area.rect.size);
-    }
-    if (layout != nullptr) {
-        for (const LayoutNote &note : layout->notes) {
-            minimum = glm::min(minimum, note.position);
-            maximum = glm::max(maximum, note.position + Layout::noteSize(note));
-        }
-    }
-    if (minimum.x > maximum.x) {
+    if (mapBounds.size.x <= 0) {
         targetCenter = glm::dvec2(0, 0);
         targetZoom = 1;
     } else {
-        // Карта целиком в открытой части холста (без окон интерфейса по краям)
-        glm::dvec2 size = glm::max(maximum - minimum, glm::dvec2(1));
+        // Карта целиком в открытой части холста (без окон интерфейса по краям), без нижнего предела масштаба - любая карта влезает
         glm::dvec2 open = glm::max(glm::dvec2(viewport) - glm::dvec2(viewInsets.x + viewInsets.z, viewInsets.y + viewInsets.w), glm::dvec2(50));
-        targetZoom = std::clamp(std::min(open.x / size.x, open.y / size.y) * 0.94, 0.02, 1.5);
-        targetCenter = (minimum + maximum) * 0.5 - (openCenter() - glm::dvec2(viewport) * 0.5) / targetZoom;
+        targetZoom = std::min(std::min(open.x / mapBounds.size.x, open.y / mapBounds.size.y) * 0.94, 1.5);
+        targetCenter = mapBounds.position + mapBounds.size * 0.5 - (openCenter() - glm::dvec2(viewport) * 0.5) / targetZoom;
     }
     if (isImmediate) {
         cameraCenter = targetCenter;
